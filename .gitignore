@@ -13,3 +13,8 @@ node_modules/
 *.pt
 *.safetensors
 *.onnx
+*.part
+.pytest_cache/
+samples/tmp/
+Personal/
+.logs/

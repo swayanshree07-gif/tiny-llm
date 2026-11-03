@@ -1,0 +1,7 @@
+# torch must come from the CUDA 12.8 index (RTX 5050 = sm_120):
+#   .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cu128
+numpy
+regex
+tqdm
+matplotlib
+pytest

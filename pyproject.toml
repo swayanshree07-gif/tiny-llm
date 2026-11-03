@@ -1,0 +1,9 @@
+[project]
+name = "tinyllm"
+version = "0.1.0"
+description = "A small GPT-style language model from scratch in PyTorch"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
