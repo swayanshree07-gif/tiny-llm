@@ -31,6 +31,7 @@ def main(argv=None) -> int:
     ap.add_argument("--top-p", type=float, default=0.95)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--no-cache", action="store_true", help="disable the KV cache (slower)")
     args = ap.parse_args(argv)
 
     device = get_device(args.device)
@@ -40,7 +41,7 @@ def main(argv=None) -> int:
     idx = torch.tensor([ids] * args.num_samples, dtype=torch.long, device=device)
     g = torch.Generator(device=device).manual_seed(args.seed)
     out = generate(model, idx, args.max_new_tokens, args.temperature, args.top_k, args.top_p,
-                   eot_id=tok.eot_id, generator=g)
+                   eot_id=tok.eot_id, generator=g, use_cache=not args.no_cache)
     print(f"# checkpoint step {st['step']}, T={args.temperature} top_k={args.top_k} top_p={args.top_p}")
     for i, row in enumerate(out.tolist()):
         row = row[: row.index(tok.eot_id, len(ids))] if tok.eot_id in row[len(ids):] else row

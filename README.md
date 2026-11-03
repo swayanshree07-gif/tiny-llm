@@ -51,17 +51,23 @@ log file, not `| tail`.
 .venv/bin/python scripts/generate.py --ckpt ckpt/base --prompt "Once upon a time" -n 3 \
     --temperature 0.8 --top-p 0.95          # --top-k K, --temperature 0 for greedy
 .venv/bin/python scripts/bench.py --out docs/bench.md   # throughput / VRAM table
+.venv/bin/python scripts/bench_kv.py --ckpt ckpt/base --out docs/kv_cache.md   # KV cache speedup
+.venv/bin/python scripts/sample_suite.py --ckpt ckpt/base --out samples/suite.md  # prompts x settings + stats
 ```
+Generation uses a KV cache by default (`--no-cache` turns it off); greedy output is identical
+either way while the text fits in the 256-token context.
 
 ## Layout
 ```
 tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
-                optim.py (AdamW groups, warmup+cosine), checkpoint.py, train.py, generate.py
+                optim.py (AdamW groups, warmup+cosine), checkpoint.py, train.py, generate.py,
+                quality.py (repetition / length stats for samples)
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
-                train.py, generate.py, plot_metrics.py, bench.py
+                train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py
 configs/        base.json (main run), smoke.json (small model, quick checks)
 tests/          pytest suite
-docs/           bench.md, figures/ (loss curves), report later
+docs/           bench.md, kv_cache.md, figures/ (loss curves), report later
+samples/        sample-suite outputs (samples/tmp/ is git-ignored)
 ```
 
 ## Limits (from CLAUDE.md)
@@ -69,13 +75,15 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–17 of `PLAN.md` are done, plus the Day 19 plot script; the main training run has started.
+Days 1–17, 19, 24 (KV cache) and 26 (sample-suite script) of `PLAN.md` are done; the main run is
+in progress (session 1 of ~3 done).
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params.
 - Training: bf16 autocast, gradient accumulation, clipping, AdamW decay groups, warmup + cosine
   LR, JSON configs + CLI overrides, val loss/perplexity, JSONL metrics, checkpoints (keep 2),
   exact resume, time budget and SIGTERM handling, optional `torch.compile` (+31% throughput).
-- Generation: temperature / top-k / top-p, stops at `<|endoftext|>`.
-- Main run `ckpt/base`: step 651 / 40,000, val loss 2.219 (ppl 9.2); samples are already
-  readable short stories. Curve: `docs/figures/loss.png`. Later sessions resume it.
-- Not yet: KV cache, ablations, final report.
+- Generation: temperature / top-k / top-p, stops at `<|endoftext|>`, KV cache (identical greedy
+  output; 1.6x faster at batch 1, 9–22x at batch 8–32, see `docs/kv_cache.md`).
+- Main run `ckpt/base`: step 14,030 / 40,000, val loss 1.384 (ppl 4.0). Stories are coherent and
+  usually end on their own (`samples/suite_step14030.md`). Curve: `docs/figures/loss.png`.
+- Not yet: rest of the main run, ablations (positions, LR/batch), final report.

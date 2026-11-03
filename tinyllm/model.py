@@ -3,6 +3,9 @@
 Pre-LayerNorm decoder: x + attn(ln(x)), x + mlp(ln(x)); tied input/output embeddings.
 Positions: cfg.pos = "learned" (absolute embeddings) or "rope" (rotary, applied to q and k).
 
+Inference can pass a list of `KVCache` (one per layer, see `GPT.new_kv_cache`): keys/values of
+earlier positions are stored, so each new token only costs one position of compute.
+
 Causal self-attention has two interchangeable paths:
   - "manual": explicit QK^T / sqrt(d), causal mask, softmax, @V (readable reference)
   - "sdpa":   torch.nn.functional.scaled_dot_product_attention(is_causal=True) (fast)
@@ -49,6 +52,30 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
     return out.type_as(x)
 
 
+class KVCache:
+    """Preallocated keys/values for one layer: (B, H, max_len, D). `pos` = filled length.
+
+    The cache stores keys after RoPE has been applied, so cached keys never need re-rotating.
+    """
+
+    def __init__(self, B: int, H: int, max_len: int, D: int, device=None, dtype=torch.float32) -> None:
+        self.k = torch.zeros(B, H, max_len, D, device=device, dtype=dtype)
+        self.v = torch.zeros_like(self.k)
+        self.pos = 0
+
+    @property
+    def max_len(self) -> int:
+        return self.k.size(2)
+
+    def append(self, k: torch.Tensor, v: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        T = k.size(2)
+        assert self.pos + T <= self.max_len, f"KV cache overflow ({self.pos}+{T} > {self.max_len})"
+        self.k[:, :, self.pos:self.pos + T] = k.to(self.k.dtype)
+        self.v[:, :, self.pos:self.pos + T] = v.to(self.v.dtype)
+        self.pos += T
+        return self.k[:, :, :self.pos].type_as(k), self.v[:, :, :self.pos].type_as(v)
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.0, impl: str = "sdpa") -> None:
         super().__init__()
@@ -60,20 +87,31 @@ class CausalSelfAttention(nn.Module):
         self.dropout = dropout
         self.resid_drop = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, rope: tuple | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, rope: tuple | None = None, cache: KVCache | None = None) -> torch.Tensor:
         B, T, C = x.shape
+        start = cache.pos if cache is not None else 0
         q, k, v = self.qkv(x).split(C, dim=2)
         # (B, T, C) -> (B, H, T, D)
         q, k, v = (t.view(B, T, self.n_heads, self.head_dim).transpose(1, 2) for t in (q, k, v))
         if rope is not None:
-            cos, sin = rope[0][:T], rope[1][:T]
+            cos, sin = rope[0][start:start + T], rope[1][start:start + T]
             q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
+        if cache is not None:
+            k, v = cache.append(k, v)  # now (B, H, start + T, D)
+        S = k.size(2)
         p = self.dropout if self.training else 0.0
+        # query i (absolute position start+i) may see keys 0..start+i
+        mask = None
+        if start > 0 and T > 1:
+            mask = torch.ones(T, S, dtype=torch.bool, device=x.device).tril(diagonal=start)
         if self.impl == "sdpa":
-            y = F.scaled_dot_product_attention(q, k, v, dropout_p=p, is_causal=True)
+            if mask is not None:
+                y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=p)
+            else:  # full causal block, or a single new query that may see everything
+                y = F.scaled_dot_product_attention(q, k, v, dropout_p=p, is_causal=(start == 0 and T > 1))
         else:
             att = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-            mask = torch.ones(T, T, dtype=torch.bool, device=x.device).tril()
+            mask = torch.ones(T, S, dtype=torch.bool, device=x.device).tril(diagonal=start)
             att = att.masked_fill(~mask, float("-inf")).softmax(dim=-1)
             att = F.dropout(att, p=p, training=self.training)
             y = att @ v
@@ -100,8 +138,8 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(cfg.d_model)
         self.mlp = MLP(cfg.d_model, cfg.mlp_ratio, cfg.dropout)
 
-    def forward(self, x: torch.Tensor, rope: tuple | None = None) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x), rope)
+    def forward(self, x: torch.Tensor, rope: tuple | None = None, cache: KVCache | None = None) -> torch.Tensor:
+        x = x + self.attn(self.ln1(x), rope, cache)
         return x + self.mlp(self.ln2(x))
 
 
@@ -140,18 +178,27 @@ class GPT(nn.Module):
             n -= self.pos_emb.weight.numel()
         return n
 
-    def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None):
+    def new_kv_cache(self, batch_size: int, device=None, dtype=torch.float32) -> list[KVCache]:
+        c = self.cfg
+        device = device if device is not None else self.tok_emb.weight.device
+        return [KVCache(batch_size, c.n_heads, c.block_size, c.d_model // c.n_heads, device, dtype)
+                for _ in range(c.n_layers)]
+
+    def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None,
+                kv_cache: list[KVCache] | None = None):
+        """idx (B, T). With kv_cache, idx holds the *new* tokens at positions cache.pos.. ."""
         B, T = idx.shape
-        assert T <= self.cfg.block_size, f"sequence {T} > block_size {self.cfg.block_size}"
+        start = kv_cache[0].pos if kv_cache is not None else 0
+        assert start + T <= self.cfg.block_size, f"sequence {start + T} > block_size {self.cfg.block_size}"
         x = self.tok_emb(idx)
         rope = None
         if self.pos_emb is not None:
-            x = x + self.pos_emb(torch.arange(T, device=idx.device))
+            x = x + self.pos_emb(torch.arange(start, start + T, device=idx.device))
         else:
             rope = (self.rope_cos, self.rope_sin)
         x = self.drop(x)
-        for blk in self.blocks:
-            x = blk(x, rope)
+        for i, blk in enumerate(self.blocks):
+            x = blk(x, rope, kv_cache[i] if kv_cache is not None else None)
         logits = self.head(self.ln_f(x))
         loss = None
         if targets is not None:

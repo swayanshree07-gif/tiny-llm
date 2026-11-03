@@ -1,4 +1,11 @@
-"""Autoregressive sampling: temperature, top-k, top-p (nucleus). No KV cache yet (PLAN Day 24)."""
+"""Autoregressive sampling: temperature, top-k, top-p (nucleus), optional KV cache.
+
+With use_cache=True the prompt is run once (prefill) and then each step feeds only the new token.
+While the sequence fits in block_size this gives exactly the same logits as the uncached path.
+When the cache is full, it is rebuilt from the last block_size // 2 tokens (one prefill), so from
+then on the model sees a shorter, jumping window than the uncached sliding window: outputs past
+block_size can differ between the two modes.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,16 +39,26 @@ def filter_logits(logits: torch.Tensor, top_k: int | None = None, top_p: float |
 @torch.no_grad()
 def generate(model: GPT, idx: torch.Tensor, max_new_tokens: int, temperature: float = 1.0,
              top_k: int | None = None, top_p: float | None = None, eot_id: int | None = None,
-             generator: torch.Generator | None = None) -> torch.Tensor:
+             generator: torch.Generator | None = None, use_cache: bool = False) -> torch.Tensor:
     """Extend idx (B, T) by up to max_new_tokens. temperature <= 0 means greedy (argmax).
 
     If eot_id is given and every row has produced it, generation stops early.
+    use_cache=True uses a KV cache (see module docstring for behaviour past block_size).
     """
     model.eval()
     T = model.cfg.block_size
     done = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
+    cache = None
     for _ in range(max_new_tokens):
-        logits, _ = model(idx[:, -T:])
+        if not use_cache:
+            logits, _ = model(idx[:, -T:])
+        elif cache is None or cache[0].pos >= T:
+            # (re)fill: whole prompt if it fits with room to grow, else the last half-window
+            ctx = idx if idx.size(1) < T else idx[:, -max(1, T // 2):]
+            cache = model.new_kv_cache(idx.size(0), idx.device)
+            logits, _ = model(ctx, kv_cache=cache)
+        else:
+            logits, _ = model(idx[:, -1:], kv_cache=cache)
         logits = logits[:, -1, :].float()
         if temperature <= 0:
             nxt = logits.argmax(dim=-1, keepdim=True)
