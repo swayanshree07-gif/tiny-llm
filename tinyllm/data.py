@@ -24,7 +24,7 @@ class TokenDataset:
         starts = self.rng.integers(0, len(self.data) - T - 1, size=batch_size)
         buf = np.stack([self.data[s : s + T + 1] for s in starts]).astype(np.int64)
         xy = torch.from_numpy(buf)
-        x, y = xy[:, :-1], xy[:, 1:]
+        x, y = xy[:, :-1].contiguous(), xy[:, 1:].contiguous()
         device = torch.device(device)
         if device.type == "cuda":
             x = x.pin_memory().to(device, non_blocking=True)

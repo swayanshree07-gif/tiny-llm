@@ -42,3 +42,9 @@ def test_rng_state_resume(tokfile):
 def test_cuda_batch(tokfile):
     x, y = TokenDataset(tokfile, 16).get_batch(4, "cuda")
     assert x.is_cuda and torch.equal(x.cpu() + 1, y.cpu())
+
+
+def test_batches_contiguous(tokfile):
+    ds = TokenDataset(tokfile, block_size=16, seed=0)
+    x, y = ds.get_batch(4)
+    assert x.is_contiguous() and y.is_contiguous()
