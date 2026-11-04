@@ -51,22 +51,31 @@ def _style(ax):
     ax.set_axisbelow(True)
 
 
-def compare(runs: list[Path], labels: list[str], out: Path, title: str, skip_first: int = 1):
+def tokens_per_step(run: Path) -> int:
+    """batch_size * grad_accum * block_size from the run's config.json."""
+    c = json.loads(((run if run.is_dir() else run.parent) / "config.json").read_text())
+    return c["train"]["batch_size"] * c["train"].get("grad_accum", 1) * c["model"]["block_size"]
+
+
+def compare(runs: list[Path], labels: list[str], out: Path, title: str, skip_first: int = 1,
+            x: str = "step"):
     data = [load_run(r) for r in runs]
+    scale = [tokens_per_step(r) / 1e6 if x == "tokens" else 1 for r in runs]
     fig, ax = plt.subplots(figsize=(8, 5), facecolor=SURFACE)
     _style(ax)
     lows = []
-    for i, (d, lab) in enumerate(zip(data, labels)):
+    for i, (d, lab, k) in enumerate(zip(data, labels, scale)):
         pts = d["val"][skip_first:] or d["val"]  # step-0 loss (~9) would squash the y-axis
         if not pts:
             continue
         xs, ys = zip(*pts)
+        xs = [v * k for v in xs]
         lows.append(min(ys))
         c = COLORS[i % len(COLORS)]
         ax.plot(xs, ys, color=c, lw=2, marker="o", ms=4, mec=SURFACE, mew=1.2, label=lab)
         ax.annotate(f"{ys[-1]:.3f}", (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
                     va="center", color=c, fontsize=9)
-    ax.set_xlabel("optimizer step", color=INK2)
+    ax.set_xlabel("training tokens (millions)" if x == "tokens" else "optimizer step", color=INK2)
     ax.set_ylabel("validation loss (nats)", color=INK2)
     ax.set_title(title, color=INK, loc="left", fontsize=12)
     ax.legend(frameon=False, labelcolor=INK)
@@ -75,16 +84,20 @@ def compare(runs: list[Path], labels: list[str], out: Path, title: str, skip_fir
     fig.savefig(out, dpi=130, facecolor=SURFACE)
     plt.close(fig)
 
-    rows = ["| run | steps | final val loss | val ppl | best val loss | tok/s |",
-            "|-----|------:|---------------:|--------:|--------------:|------:|"]
-    for d, lab in zip(data, labels):
+    rows = ["| run | steps | tokens (M) | final val loss | val ppl | best val loss | tok/s |",
+            "|-----|------:|-----------:|---------------:|--------:|--------------:|------:|"]
+    for d, lab, r in zip(data, labels, runs):
         if not d["val"]:
-            rows.append(f"| {lab} | – | – | – | – | – |")
+            rows.append(f"| {lab} | – | – | – | – | – | – |")
             continue
         step, vl = d["val"][-1]
         best = min(v for _, v in d["val"])
         tps = f"{d['tok_per_s'] / 1000:.1f}k" if d["tok_per_s"] else "–"
-        rows.append(f"| {lab} | {step} | {vl:.4f} | {math.exp(vl):.2f} | {best:.4f} | {tps} |")
+        try:
+            toks = f"{step * tokens_per_step(r) / 1e6:.1f}"
+        except (OSError, KeyError, ValueError):
+            toks = "–"
+        rows.append(f"| {lab} | {step} | {toks} | {vl:.4f} | {math.exp(vl):.2f} | {best:.4f} | {tps} |")
     return out, "\n".join(rows) + "\n"
 
 
@@ -95,12 +108,14 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="docs/figures/compare.png")
     ap.add_argument("--table", default=None, help="also write the markdown table to this file")
     ap.add_argument("--title", default="Validation loss by run")
+    ap.add_argument("--x", choices=["step", "tokens"], default="step",
+                    help="x-axis; 'tokens' needs config.json in each run dir")
     a = ap.parse_args(argv)
     runs = [Path(r) for r in a.runs]
     labels = a.labels or [r.name for r in runs]
     if len(labels) != len(runs):
         raise SystemExit("--labels must match the number of runs")
-    out, table = compare(runs, labels, Path(a.out), a.title)
+    out, table = compare(runs, labels, Path(a.out), a.title, x=a.x)
     print(out)
     print(table, end="")
     if a.table:

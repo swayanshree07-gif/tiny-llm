@@ -31,6 +31,10 @@ cut at a story boundary. `data/`, `ckpt/` and `.venv/` are git-ignored.
 ```
 Tokens are stored as uint16; id 8191 is `<|endoftext|>` (story separator).
 Current numbers: 4.14 bytes/token, 176.7M train tokens, 5.4M val tokens.
+```bash
+.venv/bin/python scripts/check_tokenizer.py            # full-val round-trip, .bin matches, bytes/token
+.venv/bin/python scripts/check_tokenizer.py --split train --mb 50   # same on a train prefix
+```
 
 ## Train
 ```bash
@@ -55,7 +59,12 @@ log file, not `| tail`.
 .venv/bin/python scripts/sample_suite.py --ckpt ckpt/base --out samples/suite.md  # prompts x settings + stats
 .venv/bin/python scripts/compare_runs.py ckpt/runA ckpt/runB --labels A B --out docs/figures/cmp.png  # val curves + table
 scripts/run_abl_pos.sh     # RoPE vs learned positions ablation (2 x ~10 min GPU) -> docs/figures/abl_pos.png
+scripts/run_sweep.sh       # LR 3e-4 / 1.2e-3 and 32k-token batch (3 x ~10 min GPU) -> docs/figures/sweep.png
 ```
+`compare_runs.py --x tokens` plots against training tokens instead of steps (needed when
+runs use different batch sizes). The sweep reuses `ckpt/abl_pos_rope` as its lr 6e-4 / 16k
+baseline, so run `run_abl_pos.sh` first. It deletes the `.pt` files of finished sweep runs
+after plotting (the metrics stay), so the extra disk use is temporary.
 Generation uses a KV cache by default (`--no-cache` turns it off); greedy output is identical
 either way while the text fits in the 256-token context.
 
@@ -66,9 +75,10 @@ tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
                 quality.py (repetition / length stats for samples)
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
-                compare_runs.py, run_abl_pos.sh
+                compare_runs.py, check_tokenizer.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
-                abl_pos_{rope,learned}.json (positions ablation, 3000 steps each)
+                abl_pos_{rope,learned}.json (positions ablation, 3000 steps each),
+                sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each)
 tests/          pytest suite
 docs/           bench.md, kv_cache.md, figures/ (loss curves), report later
 samples/        sample-suite outputs (samples/tmp/ is git-ignored)
@@ -79,15 +89,18 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–17, 19, 24 (KV cache) and 26 (sample-suite script) of `PLAN.md` are done; the main run is
-in progress (session 2 of ~3 done). The Day 21 positions ablation is set up but not yet run.
-- Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens.
+Days 1–20, 22, 24 (KV cache), 25 (main run finished) and 26 (sample-suite script) of `PLAN.md` are done.
+The Day 21 positions ablation and the Day 23 LR/batch sweep are set up (`scripts/run_abl_pos.sh`,
+`scripts/run_sweep.sh`) but not yet run.
+- Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
+  4.14 bytes/token; `scripts/check_tokenizer.py` re-verifies the full-val round-trip.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params.
 - Training: bf16 autocast, gradient accumulation, clipping, AdamW decay groups, warmup + cosine
   LR, JSON configs + CLI overrides, val loss/perplexity, JSONL metrics, checkpoints (keep 2),
   exact resume, time budget and SIGTERM handling, optional `torch.compile` (+31% throughput).
 - Generation: temperature / top-k / top-p, stops at `<|endoftext|>`, KV cache (identical greedy
   output; 1.6x faster at batch 1, 9–22x at batch 8–32, see `docs/kv_cache.md`).
-- Main run `ckpt/base`: step 27,495 / 40,000, val loss 1.279 (ppl 3.59). Stories are coherent
-  and almost always end on their own (`samples/suite_step27495.md`). Curve: `docs/figures/loss.png`.
-- Not yet: last main-run session (to 40k), ablations (positions, LR/batch), final report.
+- Main run `ckpt/base`: **finished, 40,000 steps (655M tokens), val loss 1.229 (ppl 3.42)**, in 3
+  sessions of ~42 min. Stories are coherent, have a plot and end on their own (23/24 in
+  `samples/suite_step40000.md`). Curve: `docs/figures/loss.png`.
+- Not yet: ablations (positions, LR/batch), final report, demo script.

@@ -32,4 +32,22 @@ def test_compare_runs_dedupes_and_tables(tmp_path):
     assert compare_runs.load_run(runs[0])["val"] == [(0, 9.0), (100, 3.0), (200, 2.0)]
     out, table = compare_runs.compare(runs, ["A", "B"], tmp_path / "c.png", "t")
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-    assert "| A | 200 | 2.0000 |" in table and "| B | 200 | 2.3000 |" in table and "1.0k" in table
+    assert "| A | 200 | – | 2.0000 |" in table and "| B | 200 | – | 2.3000 |" in table and "1.0k" in table
+
+
+def test_compare_runs_tokens_axis(tmp_path):
+    import compare_runs
+    runs = []
+    for name, accum, steps in (("bs16k", 2, (100, 200)), ("bs32k", 4, (50, 100))):
+        d = tmp_path / name
+        d.mkdir()
+        cfg = {"model": {"block_size": 256}, "train": {"batch_size": 32, "grad_accum": accum}}
+        (d / "config.json").write_text(json.dumps(cfg))
+        recs = [{"type": "val", "step": s, "loss": 3.0} for s in steps]
+        (d / "metrics.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+        runs.append(d)
+    assert compare_runs.tokens_per_step(runs[1]) == 32768
+    out, table = compare_runs.compare(runs, ["A", "B"], tmp_path / "t.png", "t", x="tokens")
+    assert out.exists()
+    # equal token budgets: 200 steps x 16k == 100 steps x 32k == 3.3M tokens
+    assert "| A | 200 | 3.3 |" in table and "| B | 100 | 3.3 |" in table
