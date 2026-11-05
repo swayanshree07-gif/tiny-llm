@@ -20,6 +20,7 @@ import torch
 
 from .checkpoint import latest_checkpoint, load_checkpoint, save_checkpoint
 from .data import TokenDataset
+from .instruct import InstructDataset
 from .device import best_autocast_dtype, get_device
 from .model import GPT, GPTConfig
 from .optim import lr_at, make_optimizer
@@ -56,6 +57,8 @@ class TrainConfig:
     overfit_one_batch: bool = False
     train_file: str = "train.bin"
     val_file: str = "valid.bin"
+    data_kind: str = "tokens"     # "tokens" (uint16 .bin windows) or "instruct" (.npz rows with masked targets)
+    init_from: str | None = None  # fine-tune: load model weights (only) from this ckpt file/dir on a fresh start
 
 
 def config_from_dict(d: dict) -> tuple[GPTConfig, TrainConfig]:
@@ -161,8 +164,19 @@ def train(mcfg: GPTConfig, tcfg: TrainConfig, verbose: bool = True) -> dict:
         torch.backends.cudnn.allow_tf32 = True
 
     data_dir = Path(tcfg.data_dir)
-    train_ds = TokenDataset(data_dir / tcfg.train_file, mcfg.block_size, seed=tcfg.seed)
-    val_ds = TokenDataset(data_dir / tcfg.val_file, mcfg.block_size, seed=tcfg.eval_seed)
+    if tcfg.data_kind == "instruct":
+        def load_rows(name: str, seed: int) -> InstructDataset:
+            z = np.load(data_dir / name)
+            ds = InstructDataset(z["x"].astype(np.int64), z["y"].astype(np.int64), seed=seed)
+            assert ds.block_size == mcfg.block_size, "instruct rows must be block_size long"
+            return ds
+        train_ds = load_rows(tcfg.train_file, tcfg.seed)
+        val_ds = load_rows(tcfg.val_file, tcfg.eval_seed)
+    elif tcfg.data_kind == "tokens":
+        train_ds = TokenDataset(data_dir / tcfg.train_file, mcfg.block_size, seed=tcfg.seed)
+        val_ds = TokenDataset(data_dir / tcfg.val_file, mcfg.block_size, seed=tcfg.eval_seed)
+    else:
+        raise ValueError(f"unknown data_kind {tcfg.data_kind!r}")
 
     model = GPT(mcfg).to(device)
     opt = make_optimizer(model, tcfg.lr, tcfg.weight_decay, (tcfg.beta1, tcfg.beta2))
@@ -188,6 +202,17 @@ def train(mcfg: GPTConfig, tcfg: TrainConfig, verbose: bool = True) -> dict:
             metrics_path.write_text("".join(ln + "\n" for ln in keep))
     else:
         metrics_path.write_text("")  # fresh run: start a new log
+        if tcfg.init_from:
+            src = Path(tcfg.init_from)
+            src = latest_checkpoint(src) if src.is_dir() else src
+            if src is None:
+                raise FileNotFoundError(f"init_from {tcfg.init_from}: no checkpoint")
+            st = load_checkpoint(src)
+            if st["model_config"] != mcfg.to_dict():
+                raise ValueError(f"init_from {src} model config differs from requested config")
+            model.load_state_dict(st["model"])
+            if verbose:
+                _say(f"[train] initialised weights from {src} (step {st['step']}); fresh optimizer")
 
     fwd_model = torch.compile(model) if tcfg.compile else model
     ctx = lambda: autocast_ctx(device, tcfg.dtype)  # noqa: E731

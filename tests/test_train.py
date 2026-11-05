@@ -117,3 +117,47 @@ def test_config_from_dict_and_cli_overrides(data_dir, tmp_path):
     assert (out / "config.json").exists()
     assert json.loads((out / "config.json").read_text())["train"]["max_steps"] == 6
     assert sorted(x.name for x in out.glob("ckpt_*.pt")) == ["ckpt_0000003.pt", "ckpt_0000006.pt"]
+
+
+def _instruct_dir(tmp_path):
+    # rows: prompt tokens (no loss) then a learnable sequence; targets -100 on the prompt
+    rng = np.random.default_rng(0)
+    d = tmp_path / "inst"
+    d.mkdir()
+    for name, n in (("train.npz", 64), ("valid.npz", 16)):
+        x = np.empty((n, 16), dtype=np.uint16)
+        y = np.full((n, 16), -100, dtype=np.int16)
+        for r in range(n):
+            seq = [int(rng.integers(V))] * 4 + [0] * 13
+            for i in range(4, 17):
+                seq[i] = (seq[i - 1] * 5 + 3) % V
+            x[r] = seq[:16]
+            y[r, 3:] = seq[4:17]
+        np.savez(d / name, x=x, y=y)
+    return d
+
+
+def test_instruct_finetune_from_checkpoint(data_dir, tmp_path):
+    base = train(MCFG, tcfg(data_dir, tmp_path / "base", max_steps=10), verbose=False)
+    assert base["step"] == 10
+    from tinyllm.checkpoint import latest_checkpoint, load_checkpoint
+    w0 = load_checkpoint(latest_checkpoint(tmp_path / "base"))["model"]["tok_emb.weight"]
+    inst = _instruct_dir(tmp_path)
+    ft_cfg = tcfg(inst, tmp_path / "ft", data_kind="instruct", train_file="train.npz",
+                  val_file="valid.npz", init_from=str(tmp_path / "base"), max_steps=40, eval_interval=40)
+    out = train(MCFG, ft_cfg, verbose=False)
+    vals = [h["loss"] for h in out["history"] if h["type"] == "val"]
+    assert vals[-1] < vals[0] * 0.7
+    st = load_checkpoint(latest_checkpoint(tmp_path / "ft"))
+    assert st["train_config"]["init_from"] == str(tmp_path / "base")
+    assert not torch.equal(st["model"]["tok_emb.weight"], w0)  # weights moved on from the base
+
+
+def test_init_from_loads_weights(data_dir, tmp_path):
+    train(MCFG, tcfg(data_dir, tmp_path / "base", max_steps=10), verbose=False)
+    a = train(MCFG, tcfg(data_dir, tmp_path / "a", max_steps=1, init_from=str(tmp_path / "base"),
+                         lr=0.0, min_lr=0.0, eval_interval=1), verbose=False)
+    b = train(MCFG, tcfg(data_dir, tmp_path / "b", max_steps=1, eval_interval=1), verbose=False)
+    va = [h["loss"] for h in a["history"] if h["type"] == "val"][0]
+    vb = [h["loss"] for h in b["history"] if h["type"] == "val"][0]
+    assert va < vb - 0.3  # trained weights start far below a fresh init

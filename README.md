@@ -34,6 +34,7 @@ Current numbers: 4.14 bytes/token, 176.7M train tokens, 5.4M val tokens.
 ```bash
 .venv/bin/python scripts/check_tokenizer.py            # full-val round-trip, .bin matches, bytes/token
 .venv/bin/python scripts/check_tokenizer.py --split train --mb 50   # same on a train prefix
+.venv/bin/python scripts/check_tokens.py               # .bin sizes vs meta, id range, random slices readable
 ```
 
 ## Train
@@ -65,6 +66,19 @@ scripts/run_sweep.sh       # LR 3e-4 / 1.2e-3 and 32k-token batch (3 x ~10 min G
 runs use different batch sizes). The sweep reuses `ckpt/abl_pos_rope` as its lr 6e-4 / 16k
 baseline, so run `run_abl_pos.sh` first. It deletes the `.pt` files of finished sweep runs
 after plotting (the metrics stay), so the extra disk use is temporary.
+### Instruction fine-tune (PLAN Day 27)
+```bash
+.venv/bin/python scripts/build_instruct.py        # -> data/instruct/{train,valid}.npz + *_prompts.jsonl (~5 s)
+.venv/bin/python scripts/eval_instruct.py --ckpt ckpt/base --out docs/instruct_eval_base.md   # before
+timeout 20m .venv/bin/python scripts/train.py --config configs/instruct.json > .logs/instruct.log 2>&1
+.venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct --out docs/instruct_eval_ft.md  # after
+```
+The examples are built from our own stories, so nothing extra is downloaded. Each prompt is either
+`Prompt: Write a short story that uses the words "a", "b" and "c".\nStory:` or `... that begins with: "<sentence>"`.
+The loss is computed on the story only (prompt and padding targets are -100). `eval_instruct.py` measures
+how often the generated story actually contains the requested words or starts with the requested sentence.
+`train.init_from` loads the weights only (with a fresh optimizer), and `train.data_kind=instruct` reads `.npz` rows.
+
 Generation uses a KV cache by default (`--no-cache` turns it off); greedy output is identical
 either way while the text fits in the 256-token context.
 
@@ -72,15 +86,17 @@ either way while the text fits in the 256-token context.
 ```
 tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
                 optim.py (AdamW groups, warmup+cosine), checkpoint.py, train.py, generate.py,
-                quality.py (repetition / length stats for samples)
+                quality.py (repetition / length stats for samples), instruct.py (fine-tune data)
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
-                compare_runs.py, check_tokenizer.py, run_abl_pos.sh, run_sweep.sh
+                compare_runs.py, check_tokenizer.py, check_tokens.py, build_instruct.py,
+                eval_instruct.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
                 abl_pos_{rope,learned}.json (positions ablation, 3000 steps each),
-                sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each)
+                sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each),
+                instruct.json (Day 27 fine-tune from ckpt/base)
 tests/          pytest suite
-docs/           bench.md, kv_cache.md, figures/ (loss curves), report later
+docs/           REPORT.md (draft), bench.md, kv_cache.md, instruct_eval_*.md, figures/
 samples/        sample-suite outputs (samples/tmp/ is git-ignored)
 ```
 
@@ -89,18 +105,20 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–20, 22, 24 (KV cache), 25 (main run finished) and 26 (sample-suite script) of `PLAN.md` are done.
-The Day 21 positions ablation and the Day 23 LR/batch sweep are set up (`scripts/run_abl_pos.sh`,
-`scripts/run_sweep.sh`) but not yet run.
+Days 1–26 of `PLAN.md` are done, and Day 27 (instruction fine-tune) has a first pass. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
-  4.14 bytes/token; `scripts/check_tokenizer.py` re-verifies the full-val round-trip.
+  4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params.
 - Training: bf16 autocast, gradient accumulation, clipping, AdamW decay groups, warmup + cosine
   LR, JSON configs + CLI overrides, val loss/perplexity, JSONL metrics, checkpoints (keep 2),
-  exact resume, time budget and SIGTERM handling, optional `torch.compile` (+31% throughput).
+  exact resume, time budget and SIGTERM handling, optional `torch.compile` (+31% throughput),
+  weight-only `init_from` for fine-tunes.
 - Generation: temperature / top-k / top-p, stops at `<|endoftext|>`, KV cache (identical greedy
   output; 1.6x faster at batch 1, 9–22x at batch 8–32, see `docs/kv_cache.md`).
-- Main run `ckpt/base`: **finished, 40,000 steps (655M tokens), val loss 1.229 (ppl 3.42)**, in 3
-  sessions of ~42 min. Stories are coherent, have a plot and end on their own (23/24 in
-  `samples/suite_step40000.md`). Curve: `docs/figures/loss.png`.
-- Not yet: ablations (positions, LR/batch), final report, demo script.
+- Main run `ckpt/base`: **finished, 40,000 steps (655M tokens), val loss 1.229 (ppl 3.42)**.
+  Stories are coherent and end on their own (`samples/suite_step40000.md`). Curve: `docs/figures/loss.png`.
+- Ablations at 49M tokens: RoPE 1.557 vs learned 1.587 (`docs/figures/abl_pos.png`). LR 1.2e-3 1.519 beats
+  6e-4 1.557 and 3e-4 1.645. A 32k batch at equal tokens is worse at 1.624 (`docs/figures/sweep.png`).
+- Instruction fine-tune v1 (`ckpt/instruct`): prompt-following goes from 0% to 16.5%. "Begins with" prompts
+  reach 88.6%, but "uses the words" prompts only 1.2% (23.6% of the requested words appear).
+- Not yet: fine-tune v2 (bigger set), final report, demo script.
