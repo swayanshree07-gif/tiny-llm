@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from .checkpoint import latest_checkpoint, load_checkpoint, save_checkpoint
 from .data import TokenDataset
@@ -59,6 +60,8 @@ class TrainConfig:
     val_file: str = "valid.bin"
     data_kind: str = "tokens"     # "tokens" (uint16 .bin windows) or "instruct" (.npz rows with masked targets)
     init_from: str | None = None  # fine-tune: load model weights (only) from this ckpt file/dir on a fresh start
+    train_mask_file: str | None = None  # instruct: .npz with bool "m" (rows x T) of positions to up-weight
+    mask_loss_weight: float = 1.0       # loss weight of masked positions (others 1); weighted mean over targets
 
 
 def config_from_dict(d: dict) -> tuple[GPTConfig, TrainConfig]:
@@ -87,9 +90,16 @@ def accumulate_grads(model: torch.nn.Module, batches, ctx_factory) -> float:
     """
     k = len(batches)
     total = 0.0
-    for x, y in batches:
+    for batch in batches:
+        x, y = batch[0], batch[1]
         with ctx_factory():
-            _, loss = model(x, y)
+            if len(batch) == 3:  # per-position weights: weighted mean over non-ignored targets
+                logits, _ = model(x)
+                ce = F.cross_entropy(logits.float().flatten(0, 1), y.flatten(), reduction="none")
+                w = batch[2].flatten() * (y.flatten() != -100)
+                loss = (ce * w).sum() / w.sum().clamp_min(1e-8)
+            else:
+                _, loss = model(x, y)
         (loss / k).backward()
         total += loss.detach().float()
     return float(total / k)
@@ -105,7 +115,7 @@ def evaluate(model: torch.nn.Module, ds: TokenDataset, iters: int, batch_size: i
     ds.rng = np.random.default_rng(seed)
     losses = []
     for _ in range(iters):
-        x, y = ds.get_batch(batch_size, device)
+        x, y = ds.get_batch(batch_size, device)[:2]  # val loss is always unweighted
         with ctx_factory():
             _, loss = model(x, y)
         losses.append(loss.float().item())
@@ -165,12 +175,16 @@ def train(mcfg: GPTConfig, tcfg: TrainConfig, verbose: bool = True) -> dict:
 
     data_dir = Path(tcfg.data_dir)
     if tcfg.data_kind == "instruct":
-        def load_rows(name: str, seed: int) -> InstructDataset:
+        def load_rows(name: str, seed: int, mask_file: str | None = None) -> InstructDataset:
             z = np.load(data_dir / name)
-            ds = InstructDataset(z["x"].astype(np.int64), z["y"].astype(np.int64), seed=seed)
+            w = None
+            if mask_file is not None:
+                m = np.load(data_dir / mask_file)["m"]
+                w = np.where(m, tcfg.mask_loss_weight, 1.0).astype(np.float32)
+            ds = InstructDataset(z["x"].astype(np.int64), z["y"].astype(np.int64), seed=seed, w=w)
             assert ds.block_size == mcfg.block_size, "instruct rows must be block_size long"
             return ds
-        train_ds = load_rows(tcfg.train_file, tcfg.seed)
+        train_ds = load_rows(tcfg.train_file, tcfg.seed, tcfg.train_mask_file)
         val_ds = load_rows(tcfg.val_file, tcfg.eval_seed)
     elif tcfg.data_kind == "tokens":
         train_ds = TokenDataset(data_dir / tcfg.train_file, mcfg.block_size, seed=tcfg.seed)

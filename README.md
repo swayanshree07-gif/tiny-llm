@@ -88,6 +88,10 @@ timeout 25m .venv/bin/python scripts/train.py --config configs/instruct_v2.json 
 timeout 25m .venv/bin/python scripts/train.py --config configs/instruct_v3.json > .logs/instruct_v3.log 2>&1
 .venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct_v3 --prompts data/instruct_v3/valid_prompts.jsonl --out docs/instruct_eval_v3_on_v3.md
 .venv/bin/python scripts/prompt_sensitivity.py --ckpt ckpt/instruct_v3 --data data/instruct_v3
+# v4 (best): same rows as v3, loss on requested-word tokens weighted x5 (mask from mark_words.py)
+.venv/bin/python scripts/mark_words.py --data data/instruct_v3            # -> train_wordmask.npz
+timeout 25m .venv/bin/python scripts/train.py --config configs/instruct_v4.json > .logs/instruct_v4.log 2>&1
+.venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct_v4 --prompts data/instruct_v3/valid_prompts.jsonl --out docs/instruct_eval_v4_on_v3.md
 ```
 The examples are built from our own stories, so nothing extra is downloaded. Each prompt is either
 `Prompt: Write a short story that uses the words "a", "b" and "c".\nStory:` or `... that begins with: "<sentence>"`.
@@ -105,12 +109,13 @@ tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
                 quality.py (repetition / length stats for samples), instruct.py (fine-tune data)
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
-                compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, check_attention.py, build_instruct.py,
+                compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, check_attention.py, check_model.py,
+                build_instruct.py, mark_words.py,
                 eval_instruct.py, prompt_sensitivity.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
                 abl_pos_{rope,learned}.json (positions ablation, 3000 steps each),
                 sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each),
-                instruct.json / instruct_v2.json / instruct_v3.json (Day 27 fine-tunes from ckpt/base)
+                instruct.json / instruct_v2..v4.json (Day 27 fine-tunes from ckpt/base)
 tests/          pytest suite
 docs/           REPORT.md (draft), bench.md, kv_cache.md, instruct_eval_*.md, figures/
 samples/        sample-suite outputs (samples/tmp/ is git-ignored)
@@ -121,10 +126,12 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–26 of `PLAN.md` are done (Day 8's attention check re-verified on the trained model on 2026-11-07), and Day 27 (instruction fine-tune) has three passes. A draft report is in `docs/REPORT.md`.
+Days 1–26 of `PLAN.md` are done (the Day 8 attention and Day 9 model checks re-run as scripts on the trained model on 2026-11-07), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
-- Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params.
+- Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params. `scripts/check_model.py`
+  re-verifies it at full size (param formula, init stds, init loss 9.07–9.08 vs ln 8192 = 9.01, causality,
+  gradients to all params, strict checkpoint load); `--random --cpu` is the quick pytest mode.
 - Training: bf16 autocast, gradient accumulation, clipping, AdamW decay groups, warmup + cosine
   LR, JSON configs + CLI overrides, val loss/perplexity, JSONL metrics, checkpoints (keep 2),
   exact resume, time budget and SIGTERM handling, optional `torch.compile` (+31% throughput),
@@ -144,4 +151,7 @@ Days 1–26 of `PLAN.md` are done (Day 8's attention check re-verified on the tr
   drew the words from the story's repeated (salient) words. Follow rate 16.5% / 20.0% on fixed / salient prompts
   (v2: 15.0% / 18.5%), words partial credit 31–37% (v2 23–27%), word-list sensitivity about doubled. Still only ~3%
   of stories use all three words.
-- Not yet: loss up-weighting on requested words (v4), final report, demo script.
+- Fine-tune v4 (`ckpt/instruct_v4`, best): v3's rows with the loss on requested-word tokens weighted ×5. Follow rate
+  **25.0% / 39.0%** on fixed / salient prompts (words-prompts 11.5% / 27.3%, partial 52–63%), "begins" unchanged
+  (87–89%). The v1/v2 checkpoints were deleted to save disk (metrics and eval docs kept).
+- Not yet: final report, demo script.

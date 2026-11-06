@@ -31,6 +31,14 @@ tokens ≥ t leaves the logits < t bit-identical, the gradient of a logit w.r.t.
 and the KV-cache chunk path matches the full forward. SDPA trains at 70.7k vs 51.2k tok/s (uncompiled, batch 32)
 and needs 3.0 vs 3.7 GB.
 
+`scripts/check_model.py` checks the full-size model (both position types) on real val text: parameter count equals
+the closed form (12d² + 4d per block, V·d tied embedding, 2d final LN, +T·d for learned positions = 29,377,536 for
+RoPE, 29,508,608 learned); init stds are 0.02 (0.02/√16 for residual projections); the init loss is 9.07–9.08 against
+ln 8192 = 9.011 (the extra ~0.07 is the logit variance 0.45²/2; the tied-embedding "self-token" logit is only +1.1–1.2
+because the embedding is ~10% of the residual stream by the last layer); the residual-stream std grows smoothly
+0.02 → 0.19 over 8 layers; causality holds bit-exactly; all parameters get finite non-zero grads; and 20 AdamW steps
+on one batch take the loss from 9.07 to 5.29.
+
 ## 3. Training
 bf16 autocast, AdamW (β = 0.9/0.95, weight decay 0.1 on matrices only), grad clip 1.0,
 micro-batch 32 × grad-accum 2 × 256 tokens = 16,384 tokens/step, LR 6e-4 with 500 warmup steps
@@ -156,6 +164,24 @@ salient prompts v2 +0.015 → v3 +0.033. "Begins" gaps are unchanged (~+0.21). S
 the model's use of the word list and raise partial credit by 8–10 points, but using all three words is still
 rare (~3%). The word list is still a weak signal next to the story-modelling loss; the remaining lever is to
 up-weight the loss on the requested-word tokens (or 1-word prompts first). Files: `instruct_eval_v{2,3}_on_{anyfix,v3}.md`.
+
+**v4 (up-weighted word tokens).** Same 132k rows and recipe as v3; only the loss changes. `scripts/mark_words.py`
+marks every target token that is part of a whole-word, case-insensitive occurrence of a requested word (4.0% of
+target tokens; every words row has at least one mark). Those positions get weight 5, everything else 1, and the
+loss is the weighted mean over the story targets (`train.train_mask_file`, `train.mask_loss_weight`). The marked tokens
+are then ~17% of the loss mass instead of 4%. Unweighted val loss 1.082 (v3 1.072): it costs a little story modelling.
+
+| eval prompts (200 held-out) | model | follows | begins | words | words partial |
+|---|---|---|---|---|---|
+| fixed "any" words | v3 | 16.5% | 82.9% | 2.4% | 30.9% |
+| | **v4** | **25.0%** | 88.6% | 11.5% | 52.3% |
+| salient words | v3 | 20.0% | 89.7% | 3.1% | 36.9% |
+| | **v4** | **39.0%** | 87.2% | 27.3% | 62.7% |
+
+Words sensitivity gap: salient +0.033 → +0.063, fixed-any +0.017 → +0.039 nats/token; begins unchanged (~+0.20–0.21).
+This is the largest single gain of the fine-tune work: the model wasn't failing to *understand* the list, the
+signal was just drowned out by ~200 other story tokens per row. Stories still end with EOT (192–196/200) and repetition
+is unchanged (rep4 0.022). Files: `instruct_eval_v4_on_{anyfix,v3}.md`.
 
 ## 6. Limitations and what's next
 - The 256-token context covers most stories; longer generations use a rebuilt cache window.

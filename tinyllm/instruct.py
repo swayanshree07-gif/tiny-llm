@@ -164,12 +164,40 @@ def stories_from_tokens(tok, ids: np.ndarray, n: int, seed: int = 0, max_tokens:
     return out
 
 
-class InstructDataset:
-    """Random rows of a prebuilt (x, y) set; same get_batch/state_dict API as TokenDataset."""
+def word_target_mask(vocab: list[bytes], y: np.ndarray, words: list[str]) -> np.ndarray:
+    """Bool mask over target positions of one row: True where the target token is (part of) a requested word.
 
-    def __init__(self, x: np.ndarray, y: np.ndarray, seed: int = 0) -> None:
+    The story is rebuilt from the target tokens (y != -100) as bytes; every whole-word,
+    case-insensitive occurrence of a requested word marks all tokens overlapping it
+    (fine-tune v4 up-weights the loss on these tokens). Prompt positions are never marked.
+    """
+    pos = np.flatnonzero(y != IGNORE)
+    pieces = [vocab[int(t)] for t in y[pos]]
+    text = b"".join(pieces)
+    lens = np.array([len(b) for b in pieces], dtype=np.int64)
+    ends = np.cumsum(lens)
+    starts = ends - lens
+    mask = np.zeros(y.shape, dtype=bool)
+    for w in words:
+        for m in re.finditer(rb"(?<![A-Za-z])" + re.escape(w.encode()) + rb"(?![A-Za-z])", text, flags=re.I):
+            hit = (starts < m.end()) & (ends > m.start())
+            mask[pos[hit]] = True
+    return mask
+
+
+class InstructDataset:
+    """Random rows of a prebuilt (x, y) set; same get_batch/state_dict API as TokenDataset.
+
+    With per-position loss weights `w` (same shape, float), get_batch returns (x, y, w).
+    """
+
+    def __init__(self, x: np.ndarray, y: np.ndarray, seed: int = 0, w: np.ndarray | None = None) -> None:
         assert x.shape == y.shape and x.ndim == 2
         self.x, self.y = torch.from_numpy(x), torch.from_numpy(y)
+        self.w = None
+        if w is not None:
+            assert w.shape == x.shape
+            self.w = torch.from_numpy(np.asarray(w, dtype=np.float32))
         self.block_size = x.shape[1]
         self.rng = np.random.default_rng(seed)
 
@@ -178,12 +206,11 @@ class InstructDataset:
 
     def get_batch(self, batch_size: int, device: torch.device | str = "cpu"):
         idx = torch.from_numpy(self.rng.integers(0, len(self.x), size=batch_size))
-        x, y = self.x[idx], self.y[idx]
+        out = [self.x[idx], self.y[idx]] + ([self.w[idx]] if self.w is not None else [])
         device = torch.device(device)
         if device.type == "cuda":
-            x = x.pin_memory().to(device, non_blocking=True)
-            y = y.pin_memory().to(device, non_blocking=True)
-        return x, y
+            out = [t.pin_memory().to(device, non_blocking=True) for t in out]
+        return tuple(out)
 
     def state_dict(self) -> dict:
         return {"rng": self.rng.bit_generator.state}

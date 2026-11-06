@@ -129,3 +129,25 @@ def test_salient_words():
             assert ex[1]["words"] == ["castle", "dragon", "knight"]
     with pytest.raises(ValueError):
         I.make_example(s, np.random.default_rng(0), word_mode="nope")
+
+
+def test_word_target_mask_marks_whole_words_only():
+    vocab = {i: bytes([i]) for i in range(256)}
+    vocab[256] = b" park"
+    vocab[257] = b" Park"
+    vocab[258] = b"ing"
+    text_ids = [256, 32] + list(b"x") + [257, 258, 256, 46]  # " park x Parking park."
+    y = np.array([-100, -100] + text_ids, dtype=np.int64)
+    m = I.word_target_mask(vocab, y, ["park"])
+    assert m.tolist() == [False, False, True, False, False, False, False, True, False]  # not "Parking"
+    m2 = I.word_target_mask(vocab, y, ["parking"])
+    assert m2[5] and m2[6] and m2.sum() == 2  # case-insensitive, multi-token word
+    assert not I.word_target_mask(vocab, y, ["zebra"]).any()
+
+
+def test_dataset_with_weights_returns_three():
+    x = np.arange(40, dtype=np.int64).reshape(10, 4)
+    w = np.full((10, 4), 2.0)
+    a = I.InstructDataset(x, x + 1, seed=3, w=w).get_batch(5)
+    assert len(a) == 3 and a[2].dtype == torch.float32 and torch.all(a[2] == 2.0)
+    assert len(I.InstructDataset(x, x + 1, seed=3).get_batch(5)) == 2

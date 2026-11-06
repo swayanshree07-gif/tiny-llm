@@ -161,3 +161,45 @@ def test_init_from_loads_weights(data_dir, tmp_path):
     va = [h["loss"] for h in a["history"] if h["type"] == "val"][0]
     vb = [h["loss"] for h in b["history"] if h["type"] == "val"][0]
     assert va < vb - 0.3  # trained weights start far below a fresh init
+
+
+def test_weighted_loss_ones_equals_unweighted_and_weights_change_grads():
+    from contextlib import nullcontext
+    torch.manual_seed(0)
+    m = GPT(MCFG)
+    x = torch.randint(0, V, (4, 16))
+    y = torch.randint(0, V, (4, 16))
+    y[:, :3] = -100
+    l_plain = accumulate_grads(m, [(x, y)], nullcontext)
+    g_plain = [p.grad.clone() for p in m.parameters()]
+    m.zero_grad(set_to_none=True)
+    l_ones = accumulate_grads(m, [(x, y, torch.ones(4, 16))], nullcontext)
+    assert abs(l_ones - l_plain) < 1e-5
+    for g, p in zip(g_plain, m.parameters()):
+        torch.testing.assert_close(p.grad, g, rtol=1e-4, atol=1e-6)
+    m.zero_grad(set_to_none=True)
+    w = torch.ones(4, 16)
+    w[:, 5] = 5.0
+    accumulate_grads(m, [(x, y, w)], nullcontext)
+    assert not torch.allclose(m.head.weight.grad, g_plain[0])
+    # weight only on one position == plain CE on that position
+    m.zero_grad(set_to_none=True)
+    w1 = torch.zeros(4, 16)
+    w1[:, 5] = 1.0
+    l1 = accumulate_grads(m, [(x, y, w1)], nullcontext)
+    with torch.no_grad():
+        ref = torch.nn.functional.cross_entropy(m(x)[0][:, 5], y[:, 5]).item()
+    assert abs(l1 - ref) < 1e-5
+
+
+def test_instruct_finetune_with_mask_weights(data_dir, tmp_path):
+    inst = _instruct_dir(tmp_path)
+    y = np.load(inst / "train.npz")["y"]
+    m = np.zeros(y.shape, dtype=bool)
+    m[:, 8] = True
+    np.savez_compressed(inst / "train_wordmask.npz", m=m)
+    cfg = tcfg(inst, tmp_path / "ftw", data_kind="instruct", train_file="train.npz", val_file="valid.npz",
+               train_mask_file="train_wordmask.npz", mask_loss_weight=5.0, max_steps=30, eval_interval=30)
+    out = train(MCFG, cfg, verbose=False)
+    vals = [h["loss"] for h in out["history"] if h["type"] == "val"]
+    assert out["step"] == 30 and vals[-1] < vals[0]
