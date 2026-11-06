@@ -18,10 +18,20 @@ class TokenDataset:
     def __len__(self) -> int:
         return len(self.data)
 
+    @property
+    def max_start(self) -> int:
+        """Largest window start get_batch can draw (inclusive).
+
+        Starts are uniform in [0, n - T - 2], so the file's final token (the EOT of the last
+        story) is never a target. Kept on purpose: widening the range would change the seeded
+        validation windows and break comparability with earlier runs' val loss (Day 7 note).
+        """
+        return len(self.data) - self.block_size - 2
+
     def get_batch(self, batch_size: int, device: torch.device | str = "cpu"):
         """x, y of shape (B, T) int64; y is x shifted left by one token."""
         T = self.block_size
-        starts = self.rng.integers(0, len(self.data) - T - 1, size=batch_size)
+        starts = self.rng.integers(0, self.max_start + 1, size=batch_size)
         buf = np.stack([self.data[s : s + T + 1] for s in starts]).astype(np.int64)
         xy = torch.from_numpy(buf)
         x, y = xy[:, :-1].contiguous(), xy[:, 1:].contiguous()

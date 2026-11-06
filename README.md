@@ -35,7 +35,11 @@ Current numbers: 4.14 bytes/token, 176.7M train tokens, 5.4M val tokens.
 .venv/bin/python scripts/check_tokenizer.py            # full-val round-trip, .bin matches, bytes/token
 .venv/bin/python scripts/check_tokenizer.py --split train --mb 50   # same on a train prefix
 .venv/bin/python scripts/check_tokens.py               # .bin sizes vs meta, id range, random slices readable
+.venv/bin/python scripts/check_loader.py               # batches: y == x shifted, ids in range, == memmap, resume, GPU speed
 ```
+The loader (`tinyllm/data.py`) draws random contiguous 257-token windows from the uint16 memmap
+(x = first 256, y = last 256), pins them and copies them to the GPU without blocking.
+It moves about 50–70M tok/s to the GPU, around 600× what training consumes.
 
 ## Train
 ```bash
@@ -72,6 +76,11 @@ after plotting (the metrics stay), so the extra disk use is temporary.
 .venv/bin/python scripts/eval_instruct.py --ckpt ckpt/base --out docs/instruct_eval_base.md   # before
 timeout 20m .venv/bin/python scripts/train.py --config configs/instruct.json > .logs/instruct.log 2>&1
 .venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct --out docs/instruct_eval_ft.md  # after
+# v2: bigger set (132k rows), ~1 epoch, lower LR
+.venv/bin/python scripts/build_instruct.py --out data/instruct_v2 --train 160000
+timeout 25m .venv/bin/python scripts/train.py --config configs/instruct_v2.json > .logs/instruct_v2.log 2>&1
+.venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct_v2 --out docs/instruct_eval_ft_v2.md
+.venv/bin/python scripts/prompt_sensitivity.py --ckpt ckpt/instruct_v2   # own vs swapped prompt story loss
 ```
 The examples are built from our own stories, so nothing extra is downloaded. Each prompt is either
 `Prompt: Write a short story that uses the words "a", "b" and "c".\nStory:` or `... that begins with: "<sentence>"`.
@@ -89,12 +98,12 @@ tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
                 quality.py (repetition / length stats for samples), instruct.py (fine-tune data)
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
-                compare_runs.py, check_tokenizer.py, check_tokens.py, build_instruct.py,
-                eval_instruct.py, run_abl_pos.sh, run_sweep.sh
+                compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, build_instruct.py,
+                eval_instruct.py, prompt_sensitivity.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
                 abl_pos_{rope,learned}.json (positions ablation, 3000 steps each),
                 sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each),
-                instruct.json (Day 27 fine-tune from ckpt/base)
+                instruct.json / instruct_v2.json (Day 27 fine-tunes from ckpt/base)
 tests/          pytest suite
 docs/           REPORT.md (draft), bench.md, kv_cache.md, instruct_eval_*.md, figures/
 samples/        sample-suite outputs (samples/tmp/ is git-ignored)
@@ -105,7 +114,7 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–26 of `PLAN.md` are done, and Day 27 (instruction fine-tune) has a first pass. A draft report is in `docs/REPORT.md`.
+Days 1–26 of `PLAN.md` are done (Day 7's loader check re-verified on 2026-11-06), and Day 27 (instruction fine-tune) has two passes. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params.
@@ -121,4 +130,7 @@ Days 1–26 of `PLAN.md` are done, and Day 27 (instruction fine-tune) has a firs
   6e-4 1.557 and 3e-4 1.645. A 32k batch at equal tokens is worse at 1.624 (`docs/figures/sweep.png`).
 - Instruction fine-tune v1 (`ckpt/instruct`): prompt-following goes from 0% to 16.5%. "Begins with" prompts
   reach 88.6%, but "uses the words" prompts only 1.2% (23.6% of the requested words appear).
-- Not yet: fine-tune v2 (bigger set), final report, demo script.
+- Fine-tune v2 (`ckpt/instruct_v2`, 132k rows, ~1 epoch): val loss 1.082 (better than v1's 1.103), but follow rate
+  is about the same at 15.0%. `scripts/prompt_sensitivity.py` shows the models barely use the word list
+  (wrong words cost +0.01 nats/token, against +0.21 for a wrong first sentence). See `docs/REPORT.md` §5.3.
+- Not yet: fine-tune v3 (make the word list matter), final report, demo script.

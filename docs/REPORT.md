@@ -99,9 +99,10 @@ story only. Measured with `scripts/eval_instruct.py` on 200 held-out prompts (T=
 | model | follows prompt |
 |---|---|
 | base (step 40,000) | 0.0% (`instruct_eval_base.md`) |
-| fine-tuned (1000 steps, lr 1e-4) | 16.5% overall: "begins with" 88.6%, "uses the words" 1.2% (`instruct_eval_ft.md`) |
+| fine-tuned v1 (33k rows, 1000 steps ≈ 2 epochs, lr 1e-4) | 16.5% overall: "begins with" 88.6%, "uses the words" 1.2% (`instruct_eval_ft.md`) |
+| fine-tuned v2 (132k rows, 2000 steps ≈ 1 epoch, lr 5e-5) | 15.0% overall: "begins with" 82.9%, "uses the words" 0.6% (`instruct_eval_ft_v2.md`) |
 
-Partial credit on "uses the words" prompts (share of requested words that appear): base 4.8%, fine-tuned 23.6%.
+Partial credit on "uses the words" prompts (share of requested words that appear): base 4.8%, v1 23.6%, v2 22.8%.
 
 The fine-tuned model reliably writes a story after `Story:` and copies a given opening sentence. It
 rarely uses three requested words: it tends to write a typical story and ignore them. Val loss (story
@@ -109,6 +110,24 @@ tokens of held-out rows) fell from 1.227 to 1.103 by step 100, then rose slightl
 while train loss fell to 0.92. One epoch is 516 steps, so the rise starts inside the first epoch. The
 quick gain is the prompt format, and after that the model fits these 33k stories. Next to try: a few
 times more rows at ≤ 1 epoch and fewer steps, and judging "uses the words" by partial credit too.
+
+v2 tried exactly that: 4× the rows, about 1 epoch, half the LR. Val loss improved (1.082 vs 1.103 at best,
+still falling at the end), but prompt-following did not; the differences from v1 are within sampling noise on
+200 prompts. `scripts/prompt_sensitivity.py` shows why. It scores each held-out story after its own prompt
+and after another row's prompt (story loss, nats/token, 200 rows per kind):
+
+| model | "words": swapped − own | "begins": swapped − own |
+|---|---|---|
+| base | +0.001 | +0.061 |
+| v1 | +0.010 | +0.210 |
+| v2 | +0.010 | +0.215 |
+
+The fine-tuned models use a given first sentence heavily, but barely use the word list: wrong words cost
+only 0.01 nats/token. Lower story loss came from better story modelling, not from reading the
+prompt. With 3 random content words per ~200-token story, the words contribute little to the loss, so
+there is little gradient pushing the model to attend to them. Ideas for the next pass: up-weight the
+loss on the requested-word tokens, use fewer, more salient words (nouns that occur more than once), or
+start with 1-word prompts and build up to 3.
 
 ## 6. Limitations and what's next
 - The 256-token context covers most stories; longer generations use a rebuilt cache window.

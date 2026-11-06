@@ -48,3 +48,23 @@ def test_batches_contiguous(tokfile):
     ds = TokenDataset(tokfile, block_size=16, seed=0)
     x, y = ds.get_batch(4)
     assert x.is_contiguous() and y.is_contiguous()
+
+
+def test_window_bounds_exact(tmp_path):
+    """Every start in [0, max_start] is reachable and nothing past it (file len T+3 -> starts 0, 1)."""
+    p = tmp_path / "small.bin"
+    np.arange(19, dtype=np.uint16).tofile(p)
+    ds = TokenDataset(p, block_size=16, seed=0)
+    assert ds.max_start == 1
+    firsts = set()
+    for _ in range(50):
+        x, y = ds.get_batch(8)
+        firsts |= set(x[:, 0].tolist())
+        assert y.max() <= 17  # final token (18) is never a target, see TokenDataset.max_start
+    assert firsts == {0, 1}
+
+
+def test_same_seed_same_batches(tokfile):
+    a, b = TokenDataset(tokfile, 16, seed=5), TokenDataset(tokfile, 16, seed=5)
+    for _ in range(3):
+        assert torch.equal(a.get_batch(4)[0], b.get_batch(4)[0])
