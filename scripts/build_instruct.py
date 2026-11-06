@@ -3,7 +3,7 @@
 -> data/instruct/{train,valid}.npz with x (uint16) and y (int16, -100 = no loss)
    and data/instruct/{split}_prompts.jsonl (prompt + spec, for prompt-following evals).
 
-Run: .venv/bin/python scripts/build_instruct.py [--train 40000] [--valid 1000] [--block 256]
+Run: .venv/bin/python scripts/build_instruct.py [--train 40000] [--valid 1000] [--block 256] [--word-mode any|salient]
 """
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ def main() -> int:
     ap.add_argument("--train", type=int, default=40000)
     ap.add_argument("--valid", type=int, default=1000)
     ap.add_argument("--block", type=int, default=256)
+    ap.add_argument("--word-mode", choices=["any", "salient"], default="any",
+                    help="'salient': prompt words occur >= 2x in the story (fine-tune v3)")
     args = ap.parse_args()
 
     tok = Tokenizer.load(args.tok_dir / "tokenizer.json")
@@ -37,7 +39,7 @@ def main() -> int:
         t0 = time.perf_counter()
         ids = np.memmap(args.tok_dir / f"{split}.bin", dtype=np.uint16, mode="r")
         stories = stories_from_tokens(tok, ids, n, seed=seed)
-        x, y, used = build_rows(tok, stories, args.block, seed=seed)
+        x, y, used = build_rows(tok, stories, args.block, seed=seed, word_mode=args.word_mode)
         np.savez(args.out / f"{split}.npz", x=x.astype(np.uint16), y=y.astype(np.int16))
         with open(args.out / f"{split}_prompts.jsonl", "w") as f:
             for prompt, spec in used:

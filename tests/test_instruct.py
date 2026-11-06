@@ -99,3 +99,33 @@ def test_stories_from_tokens(tok):
 def test_words_found_partial():
     spec = {"kind": "words", "words": ["ball", "park", "zebra"]}
     assert I.words_found(spec, "The ball is in the Park.") == pytest.approx(2 / 3)
+
+
+def test_candidate_words_no_fragments_of_capitalised_words():
+    w = I.candidate_words("Suddenly, Timmy saw a big dragon. Finally Lily smiled at the dragon.")
+    assert w == ["dragon", "smiled"]
+
+
+def test_requested_words_always_in_source_story():
+    """Every words prompt must be satisfiable by its own story (regression for the fragment bug)."""
+    stories = [STORY, "Suddenly, Tommy found a shiny shell. Tommy loved the shell and the sea. Everyone cheered.",
+               "Finally the brave knight saw the castle. The knight ran to the castle, happy and tired."]
+    for mode in ("any", "salient"):
+        rng = np.random.default_rng(0)
+        for _ in range(30):
+            for s in stories:
+                ex = I.make_example(s, rng, word_mode=mode)
+                if ex is not None:
+                    assert I.follows(ex[1], s), (mode, ex[1])
+
+
+def test_salient_words():
+    s = "The knight saw the castle. The knight ran to the castle. The dragon slept. Then the knight smiled."
+    assert I.salient_words(s) == ["knight", "castle"]
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        ex = I.make_example(s + " The dragon woke up.", rng, word_mode="salient")
+        if ex is not None and ex[1]["kind"] == "words":
+            assert ex[1]["words"] == ["castle", "dragon", "knight"]
+    with pytest.raises(ValueError):
+        I.make_example(s, np.random.default_rng(0), word_mode="nope")

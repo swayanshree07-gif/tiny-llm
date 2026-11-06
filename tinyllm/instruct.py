@@ -36,7 +36,10 @@ say see she so some than that the their them then there they thing things this t
 two up upon us very was way we went were what when where which while who why will with would
 yes you your
 """.split())
-_WORD = re.compile(r"[a-z]{4,}")
+# whole lowercase words only. Before Day 8 this was r"[a-z]{4,}", which also matched the tail of
+# capitalised words ("Suddenly" -> "uddenly", "Tommy" -> "ommy"): ~9% of v1/v2 "words" prompts asked
+# for a fragment that no story can contain. Capitalised words (names, sentence starts) are skipped.
+_WORD = re.compile(r"(?<![A-Za-z])[a-z]{4,}(?![A-Za-z])")
 
 
 def candidate_words(story: str) -> list[str]:
@@ -46,6 +49,20 @@ def candidate_words(story: str) -> list[str]:
         if w not in STOPWORDS:
             seen.setdefault(w, None)
     return list(seen)
+
+
+def salient_words(story: str, min_count: int = 2) -> list[str]:
+    """Content words (as in candidate_words) that occur at least min_count times, most frequent first.
+
+    These carry the story's topic (characters, objects, places), so a prompt made of them says
+    much more about the story than random content words like "decided" or "suddenly" (fine-tune v3).
+    """
+    counts: dict[str, int] = {}
+    for w in _WORD.findall(story):
+        if w not in STOPWORDS:
+            counts[w] = counts.get(w, 0) + 1
+    ranked = sorted(counts, key=lambda w: -counts[w])  # stable: ties keep first-seen order
+    return [w for w in ranked if counts[w] >= min_count]
 
 
 def first_sentence(story: str) -> str | None:
@@ -65,10 +82,20 @@ def begins_prompt(sentence: str) -> str:
     return f'{PROMPT_PREFIX}Write a short story that begins with: "{sentence}"{STORY_PREFIX}'
 
 
-def make_example(story: str, rng: np.random.Generator, n_words: int = 3) -> tuple[str, dict] | None:
-    """Return (prompt, spec) for a story, or None if no usable prompt. spec says what to check."""
+def make_example(story: str, rng: np.random.Generator, n_words: int = 3,
+                 word_mode: str = "any") -> tuple[str, dict] | None:
+    """Return (prompt, spec) for a story, or None if no usable prompt. spec says what to check.
+
+    word_mode "any": the words are drawn from all content words (v1/v2);
+    "salient": from the words that occur >= 2 times in the story (v3).
+    """
     if rng.random() < 0.75:
-        cands = candidate_words(story)
+        if word_mode == "salient":
+            cands = salient_words(story)
+        elif word_mode == "any":
+            cands = candidate_words(story)
+        else:
+            raise ValueError(f"unknown word_mode {word_mode!r}")
         if len(cands) < n_words:
             return None
         words = sorted(rng.choice(cands, size=n_words, replace=False).tolist())
@@ -93,7 +120,7 @@ def words_found(spec: dict, story: str) -> float:
     return sum(w in found for w in spec["words"]) / len(spec["words"])
 
 
-def build_rows(tok, stories: list[str], block_size: int, seed: int = 0):
+def build_rows(tok, stories: list[str], block_size: int, seed: int = 0, word_mode: str = "any"):
     """Encode examples into (x, y) int arrays of shape (N, block_size); y = -100 outside the story.
 
     Returns x, y (np.int64) and the list of (prompt, spec) actually used.
@@ -102,7 +129,7 @@ def build_rows(tok, stories: list[str], block_size: int, seed: int = 0):
     eot = tok.vocab_size - 1
     xs, ys, used = [], [], []
     for story in stories:
-        ex = make_example(story, rng)
+        ex = make_example(story, rng, word_mode=word_mode)
         if ex is None:
             continue
         prompt, spec = ex

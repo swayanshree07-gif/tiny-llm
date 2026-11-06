@@ -36,6 +36,7 @@ Current numbers: 4.14 bytes/token, 176.7M train tokens, 5.4M val tokens.
 .venv/bin/python scripts/check_tokenizer.py --split train --mb 50   # same on a train prefix
 .venv/bin/python scripts/check_tokens.py               # .bin sizes vs meta, id range, random slices readable
 .venv/bin/python scripts/check_loader.py               # batches: y == x shifted, ids in range, == memmap, resume, GPU speed
+.venv/bin/python scripts/check_attention.py            # trained model: manual == sdpa attention, causality, cached chunk
 ```
 The loader (`tinyllm/data.py`) draws random contiguous 257-token windows from the uint16 memmap
 (x = first 256, y = last 256), pins them and copies them to the GPU without blocking.
@@ -81,6 +82,12 @@ timeout 20m .venv/bin/python scripts/train.py --config configs/instruct.json > .
 timeout 25m .venv/bin/python scripts/train.py --config configs/instruct_v2.json > .logs/instruct_v2.log 2>&1
 .venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct_v2 --out docs/instruct_eval_ft_v2.md
 .venv/bin/python scripts/prompt_sensitivity.py --ckpt ckpt/instruct_v2   # own vs swapped prompt story loss
+# v3: words drawn from the story's salient (repeated) words; anyfix = v1/v2-style prompts with the fragment bug fixed
+.venv/bin/python scripts/build_instruct.py --out data/instruct_v3 --train 160000 --word-mode salient
+.venv/bin/python scripts/build_instruct.py --out data/instruct_anyfix --train 0      # fixed eval prompts only
+timeout 25m .venv/bin/python scripts/train.py --config configs/instruct_v3.json > .logs/instruct_v3.log 2>&1
+.venv/bin/python scripts/eval_instruct.py --ckpt ckpt/instruct_v3 --prompts data/instruct_v3/valid_prompts.jsonl --out docs/instruct_eval_v3_on_v3.md
+.venv/bin/python scripts/prompt_sensitivity.py --ckpt ckpt/instruct_v3 --data data/instruct_v3
 ```
 The examples are built from our own stories, so nothing extra is downloaded. Each prompt is either
 `Prompt: Write a short story that uses the words "a", "b" and "c".\nStory:` or `... that begins with: "<sentence>"`.
@@ -98,12 +105,12 @@ tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
                 quality.py (repetition / length stats for samples), instruct.py (fine-tune data)
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
-                compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, build_instruct.py,
+                compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, check_attention.py, build_instruct.py,
                 eval_instruct.py, prompt_sensitivity.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
                 abl_pos_{rope,learned}.json (positions ablation, 3000 steps each),
                 sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each),
-                instruct.json / instruct_v2.json (Day 27 fine-tunes from ckpt/base)
+                instruct.json / instruct_v2.json / instruct_v3.json (Day 27 fine-tunes from ckpt/base)
 tests/          pytest suite
 docs/           REPORT.md (draft), bench.md, kv_cache.md, instruct_eval_*.md, figures/
 samples/        sample-suite outputs (samples/tmp/ is git-ignored)
@@ -114,7 +121,7 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–26 of `PLAN.md` are done (Day 7's loader check re-verified on 2026-11-06), and Day 27 (instruction fine-tune) has two passes. A draft report is in `docs/REPORT.md`.
+Days 1–26 of `PLAN.md` are done (Day 8's attention check re-verified on the trained model on 2026-11-07), and Day 27 (instruction fine-tune) has three passes. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params.
@@ -133,4 +140,8 @@ Days 1–26 of `PLAN.md` are done (Day 7's loader check re-verified on 2026-11-0
 - Fine-tune v2 (`ckpt/instruct_v2`, 132k rows, ~1 epoch): val loss 1.082 (better than v1's 1.103), but follow rate
   is about the same at 15.0%. `scripts/prompt_sensitivity.py` shows the models barely use the word list
   (wrong words cost +0.01 nats/token, against +0.21 for a wrong first sentence). See `docs/REPORT.md` §5.3.
-- Not yet: fine-tune v3 (make the word list matter), final report, demo script.
+- Fine-tune v3 (`ckpt/instruct_v3`): fixed a prompt bug (~9% of word prompts asked for fragments like "uddenly") and
+  drew the words from the story's repeated (salient) words. Follow rate 16.5% / 20.0% on fixed / salient prompts
+  (v2: 15.0% / 18.5%), words partial credit 31–37% (v2 23–27%), word-list sensitivity about doubled. Still only ~3%
+  of stories use all three words.
+- Not yet: loss up-weighting on requested words (v4), final report, demo script.

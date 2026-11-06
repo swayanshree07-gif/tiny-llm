@@ -24,6 +24,13 @@ training loop, sampling) is our own code on top of plain PyTorch.
 | embeddings | tied input/output |
 | parameters | 29.4M |
 
+Attention has two paths: a readable `manual` one (QKᵀ/√d, causal mask, softmax, ·V) and PyTorch SDPA
+(`is_causal=True`, used for training). `scripts/check_attention.py` checks them against each other on the trained
+model and real val text: the fp32 logits agree to 4.8e-5 and the val loss is identical (1.355887). Changing
+tokens ≥ t leaves the logits < t bit-identical, the gradient of a logit w.r.t. later input embeddings is exactly 0,
+and the KV-cache chunk path matches the full forward. SDPA trains at 70.7k vs 51.2k tok/s (uncompiled, batch 32)
+and needs 3.0 vs 3.7 GB.
+
 ## 3. Training
 bf16 autocast, AdamW (β = 0.9/0.95, weight decay 0.1 on matrices only), grad clip 1.0,
 micro-batch 32 × grad-accum 2 × 256 tokens = 16,384 tokens/step, LR 6e-4 with 500 warmup steps
@@ -128,6 +135,27 @@ prompt. With 3 random content words per ~200-token story, the words contribute l
 there is little gradient pushing the model to attend to them. Ideas for the next pass: up-weight the
 loss on the requested-word tokens, use fewer, more salient words (nouns that occur more than once), or
 start with 1-word prompts and build up to 3.
+
+**v3 (salient words) and a prompt bug.** While building v3 I found a bug in the word picker: the regex
+`[a-z]{4,}` also matched the lowercase tail of capitalised words ("Suddenly" → "uddenly", "Tommy" → "ommy"),
+so about 9% of the v1/v2 "words" prompts asked for a fragment no story contains. That caps the follow rate.
+Fixed with word boundaries, plus a regression test that every words prompt is satisfiable by its own story;
+274 of the 818 held-out prompts change. v3 = 132k rows where the 3 words are drawn from the story's
+**salient** words (content words occurring ≥ 2×, i.e. characters/objects/places), same recipe as v2
+(`configs/instruct_v3.json`, lr 5e-5, 2000 steps, 6.5 min). Val loss 1.072 (v2 1.082, not comparable: different rows).
+
+| eval prompts (200 held-out) | model | follows | begins | words | words partial |
+|---|---|---|---|---|---|
+| fixed "any" words (`data/instruct_anyfix`) | v2 | 15.0% | 82.9% | 0.6% | 22.8% |
+| | v3 | 16.5% | 82.9% | 2.4% | 30.9% |
+| salient words (`data/instruct_v3`) | v2 | 18.5% | 87.2% | 1.9% | 27.1% |
+| | v3 | 20.0% | 89.7% | 3.1% | 36.9% |
+
+Prompt sensitivity ("words" gap, swapped − own, nats/token): on the old prompts v2 +0.010 → v3 +0.017; on
+salient prompts v2 +0.015 → v3 +0.033. "Begins" gaps are unchanged (~+0.21). So salient words roughly double
+the model's use of the word list and raise partial credit by 8–10 points, but using all three words is still
+rare (~3%). The word list is still a weak signal next to the story-modelling loss; the remaining lever is to
+up-weight the loss on the requested-word tokens (or 1-word prompts first). Files: `instruct_eval_v{2,3}_on_{anyfix,v3}.md`.
 
 ## 6. Limitations and what's next
 - The 256-token context covers most stories; longer generations use a rebuilt cache window.
