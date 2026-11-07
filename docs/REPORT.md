@@ -39,6 +39,14 @@ because the embedding is ~10% of the residual stream by the last layer); the res
 0.02 → 0.19 over 8 layers; causality holds bit-exactly; all parameters get finite non-zero grads; and 20 AdamW steps
 on one batch take the loss from 9.07 to 5.29.
 
+`scripts/check_rope.py` checks the rotary embeddings at head_dim 64. `apply_rope` equals an fp64 complex-number
+reference (x₂ᵢ + j·x₂ᵢ₊₁ times e^(j·pos·θᵢ), θᵢ = 10000^(−2i/64)) to 3e-5. Over all 256×256 position pairs the score
+⟨R_m q, R_n k⟩ depends only on m − n and equals the closed form Σ Re(qᵢ k̄ᵢ e^(j(m−n)θᵢ)) (relative error 1.5e-6).
+On the trained model the real q·k scores of layers 0 and 7 are unchanged (relative error ≤ 5e-6) when every position
+is shifted by 1, 37 or 256. The whole model's val loss is identical as well (1.35589, logits within 7e-5). So the
+RoPE model only sees relative positions and could be run at any offset. The same weights with learned positions
+change by up to 11 logits for a 1-step shift. Causality is still bit-exact, shifted or not.
+
 ## 3. Training
 bf16 autocast, AdamW (β = 0.9/0.95, weight decay 0.1 on matrices only), grad clip 1.0,
 micro-batch 32 × grad-accum 2 × 256 tokens = 16,384 tokens/step, LR 6e-4 with 500 warmup steps

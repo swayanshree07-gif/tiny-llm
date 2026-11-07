@@ -37,6 +37,7 @@ Current numbers: 4.14 bytes/token, 176.7M train tokens, 5.4M val tokens.
 .venv/bin/python scripts/check_tokens.py               # .bin sizes vs meta, id range, random slices readable
 .venv/bin/python scripts/check_loader.py               # batches: y == x shifted, ids in range, == memmap, resume, GPU speed
 .venv/bin/python scripts/check_attention.py            # trained model: manual == sdpa attention, causality, cached chunk
+.venv/bin/python scripts/check_rope.py                 # RoPE: relative-position property, shift invariance of the trained model
 ```
 The loader (`tinyllm/data.py`) draws random contiguous 257-token windows from the uint16 memmap
 (x = first 256, y = last 256), pins them and copies them to the GPU without blocking.
@@ -110,6 +111,7 @@ tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
                 compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, check_attention.py, check_model.py,
+                check_rope.py,
                 build_instruct.py, mark_words.py,
                 eval_instruct.py, prompt_sensitivity.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
@@ -126,12 +128,14 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–26 of `PLAN.md` are done (the Day 8 attention and Day 9 model checks re-run as scripts on the trained model on 2026-11-07), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
+Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params. `scripts/check_model.py`
   re-verifies it at full size (param formula, init stds, init loss 9.07–9.08 vs ln 8192 = 9.01, causality,
   gradients to all params, strict checkpoint load); `--random --cpu` is the quick pytest mode.
+  `scripts/check_rope.py` checks RoPE: <R_m q, R_n k> depends only on m − n over all 256×256 pairs, and shifting
+  every position by 1/37/256 leaves the trained model's loss unchanged (1.35589).
 - Training: bf16 autocast, gradient accumulation, clipping, AdamW decay groups, warmup + cosine
   LR, JSON configs + CLI overrides, val loss/perplexity, JSONL metrics, checkpoints (keep 2),
   exact resume, time budget and SIGTERM handling, optional `torch.compile` (+31% throughput),
