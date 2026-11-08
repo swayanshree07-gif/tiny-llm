@@ -41,6 +41,7 @@ Current numbers: 4.14 bytes/token, 176.7M train tokens, 5.4M val tokens.
 .venv/bin/python scripts/check_overfit.py              # training loop: overfit one batch (<0.1) at full size, ~15 s
 .venv/bin/python scripts/check_accum.py                # grad accum k×(B/k) == 1×B (fp32), clipping, decay groups, bf16, ~10 s
 .venv/bin/python scripts/check_schedule.py             # warmup+cosine values, short CLI run logs the LR curve (docs/figures/lr_*.png)
+.venv/bin/python scripts/check_resume.py               # 20 steps == 10 + save + resume + 10 (bit-exact, full size), ~20 s
 ```
 The loader (`tinyllm/data.py`) draws random contiguous 257-token windows from the uint16 memmap
 (x = first 256, y = last 256), pins them and copies them to the GPU without blocking.
@@ -114,7 +115,7 @@ tinyllm/        device.py, bpe_ref.py, bpe.py, tokenizer.py, data.py, model.py,
 scripts/        check_env.py, download_data.py, train_tokenizer.py, tokenize_data.py,
                 train.py, generate.py, plot_metrics.py, bench.py, bench_kv.py, sample_suite.py,
                 compare_runs.py, check_tokenizer.py, check_tokens.py, check_loader.py, check_attention.py, check_model.py,
-                check_rope.py, check_overfit.py, check_accum.py, check_schedule.py,
+                check_rope.py, check_overfit.py, check_accum.py, check_schedule.py, check_resume.py,
                 build_instruct.py, mark_words.py,
                 eval_instruct.py, prompt_sensitivity.py, run_abl_pos.sh, run_sweep.sh
 configs/        base.json (main run), smoke.json (small model, quick checks),
@@ -131,7 +132,7 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit and Day 12 grad-accum checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
+Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params. `scripts/check_model.py`
@@ -146,6 +147,8 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
   goes from 9.14 to < 0.1 at step 51 (control on fresh batches stays at 4.3). `scripts/check_accum.py` shows 2/4/8 micro-batches give
   the same fp32 grads as one batch (rel err < 1e-6) and the same AdamW update (3e-5). `scripts/check_schedule.py` checks the LR schedule against a closed form
   and that a short CLI run logs exactly that LR at every step (`docs/figures/lr_schedule.png`, `lr_run.png`).
+  `scripts/check_resume.py` shows a 20-step full-size run (bf16, dropout 0.1) and a 10 + resume + 10 run give
+  bit-identical losses, weights, AdamW state and RNG/sampler state.
 - Generation: temperature / top-k / top-p, stops at `<|endoftext|>`, KV cache (identical greedy
   output; 1.6x faster at batch 1, 9–22x at batch 8–32, see `docs/kv_cache.md`).
 - Main run `ckpt/base`: **finished, 40,000 steps (655M tokens), val loss 1.229 (ppl 3.42)**.
