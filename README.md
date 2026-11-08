@@ -172,8 +172,8 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
 - **Extended goals (2026-11-08):** `PLAN.md` Days 15–27 were rewritten around a larger model, a chat fine-tune with
   `chat.py`, inference speed (KV-cache benchmark, int8) and an evaluation report. Day 15: optional gradient
   checkpointing (`model.grad_checkpoint`, same grads, tested), candidates benchmarked in `docs/bench_large.md`
-  (`scripts/bench_large.py`), chosen `configs/large.json` (91.3M params). The large run (`ckpt/large`, ~1.1 GB per checkpoint) is finished: 18,000 steps (295M tokens), val loss 1.208 (ppl 3.35; base 29M model at the same step/tokens: 1.348); curve in `docs/figures/large_loss.png`
-  (ppl 3.78) vs the 29M base model's 1.442 at the same step. Resume with
-  `timeout 45m .venv/bin/python scripts/train.py --config configs/large.json --set train.max_minutes=40`.
+  (`scripts/bench_large.py`), chosen `configs/large.json` (91.3M params). The large run (`ckpt/large`, ~1.1 GB per checkpoint) is finished: 18,000 steps (295M tokens), val loss 1.208 (ppl 3.35; base 29M model at the same step/tokens: 1.348); curve in `docs/figures/large_loss.png`.
+  Large vs base (`docs/large_vs_base.md`, `docs/figures/large_vs_base.png`): on the same 1.6M held-out tokens
+  (`scripts/eval_ppl.py`) large 1.219 vs base 1.241 despite 2.2× fewer training tokens; samples in `samples/large.md`.
   The fine-tune v3 checkpoint and v2 data were deleted to free disk.
-- Not yet: large-vs-base comparison + samples, chat fine-tune and `chat.py`, int8, eval report, demo script.
+- Not yet: chat fine-tune and `chat.py`, int8, eval report, demo script.
