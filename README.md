@@ -172,7 +172,7 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
 - **Extended goals (2026-11-08):** `PLAN.md` Days 15–27 were rewritten around a larger model, a chat fine-tune with
   `chat.py`, inference speed (KV-cache benchmark, int8) and an evaluation report. Day 15: optional gradient
   checkpointing (`model.grad_checkpoint`, same grads, tested), candidates benchmarked in `docs/bench_large.md`
-  (`scripts/bench_large.py`), chosen `configs/large.json` (91.3M params). The large run (`ckpt/large`, ~1.1 GB per checkpoint) is at step 9,208 of 18,000 (151M tokens): val loss 1.329
+  (`scripts/bench_large.py`), chosen `configs/large.json` (91.3M params). The large run (`ckpt/large`, ~1.1 GB per checkpoint) is at step 13,705 of 18,000 (225M tokens): val loss 1.244 (ppl 3.47; base 29M model at step 13,500: 1.387); curve in `docs/figures/large_loss.png`
   (ppl 3.78) vs the 29M base model's 1.442 at the same step. Resume with
   `timeout 45m .venv/bin/python scripts/train.py --config configs/large.json --set train.max_minutes=40`.
   The fine-tune v3 checkpoint and v2 data were deleted to free disk.
