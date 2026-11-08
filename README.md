@@ -51,6 +51,8 @@ It moves about 50–70M tok/s to the GPU, around 600× what training consumes.
 ```bash
 # main run (29.4M params, 16k tokens/step, torch.compile, 42-min budget per session; resumes automatically)
 timeout 45m .venv/bin/python scripts/train.py --config configs/base.json > .logs/base.log 2>&1
+# larger model (91.3M params, 12x768, 16k tokens/step, 4.95 GB peak; 18,000 steps over ~4 sessions)
+timeout 45m .venv/bin/python scripts/train.py --config configs/large.json > .logs/large.log 2>&1
 # quick experiments: override any key
 .venv/bin/python scripts/train.py --config configs/smoke.json --set train.max_steps=200 model.pos=learned
 ```
@@ -167,4 +169,9 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
 - Fine-tune v4 (`ckpt/instruct_v4`, best): v3's rows with the loss on requested-word tokens weighted ×5. Follow rate
   **25.0% / 39.0%** on fixed / salient prompts (words-prompts 11.5% / 27.3%, partial 52–63%), "begins" unchanged
   (87–89%). The v1/v2 checkpoints were deleted to save disk (metrics and eval docs kept).
-- Not yet: final report, demo script.
+- **Extended goals (2026-11-08):** `PLAN.md` Days 15–27 were rewritten around a larger model, a chat fine-tune with
+  `chat.py`, inference speed (KV-cache benchmark, int8) and an evaluation report. Day 15: optional gradient
+  checkpointing (`model.grad_checkpoint`, same grads, tested), candidates benchmarked in `docs/bench_large.md`
+  (`scripts/bench_large.py`), chosen `configs/large.json` (91.3M params). The large run started (`ckpt/large`, ~1.1 GB per checkpoint).
+  The fine-tune v3 checkpoint and v2 data were deleted to free disk.
+- Not yet: large run finished + comparison, chat fine-tune and `chat.py`, int8, eval report, demo script.

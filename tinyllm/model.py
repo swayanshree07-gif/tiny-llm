@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 
 
 @dataclass
@@ -32,6 +33,7 @@ class GPTConfig:
     attn_impl: str = "sdpa"
     pos: str = "rope"  # "rope" or "learned"
     rope_base: float = 10000.0
+    grad_checkpoint: bool = False  # recompute block activations in backward (training only)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -198,7 +200,10 @@ class GPT(nn.Module):
             rope = (self.rope_cos, self.rope_sin)
         x = self.drop(x)
         for i, blk in enumerate(self.blocks):
-            x = blk(x, rope, kv_cache[i] if kv_cache is not None else None)
+            if self.cfg.grad_checkpoint and self.training and kv_cache is None and torch.is_grad_enabled():
+                x = torch.utils.checkpoint.checkpoint(blk, x, rope, None, use_reentrant=False)
+            else:
+                x = blk(x, rope, kv_cache[i] if kv_cache is not None else None)
         logits = self.head(self.ln_f(x))
         loss = None
         if targets is not None:
