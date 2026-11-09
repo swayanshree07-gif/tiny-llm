@@ -89,12 +89,24 @@ def decode_chat(tok, ids: list[int]) -> list[dict]:
     return out
 
 
-def story_request(story: str, rng: np.random.Generator) -> tuple[str, dict] | None:
-    """User message asking for this story, plus a checkable spec (kind words/begins/free)."""
+def story_request(story: str, rng: np.random.Generator, mode: str = "mixed") -> tuple[str, dict] | None:
+    """User message asking for this story, plus a checkable spec (kind words/begins/free).
+
+    mode "mixed" (chat v1/v2): 55% word requests with 1-3 words.
+    mode "three" (chat v3): 70% word requests, always 3 words (as in the eval), salient words when the
+    story has >= 3 of them, else any content words.
+    """
+    if mode not in ("mixed", "three"):
+        raise ValueError(f"unknown mode {mode!r}")
     r = rng.random()
-    if r < 0.55:
-        cands = salient_words(story) if rng.random() < 0.5 else candidate_words(story)
-        n = int(rng.integers(1, 4))
+    if r < (0.55 if mode == "mixed" else 0.70):
+        if mode == "three":
+            sal = salient_words(story)
+            cands = sal if len(sal) >= 3 and rng.random() < 0.7 else candidate_words(story)
+            n = 3
+        else:
+            cands = salient_words(story) if rng.random() < 0.5 else candidate_words(story)
+            n = int(rng.integers(1, 4))
         if len(cands) < n:
             return None
         words = sorted(rng.choice(cands, size=n, replace=False).tolist())
@@ -108,7 +120,7 @@ def story_request(story: str, rng: np.random.Generator) -> tuple[str, dict] | No
                         f"Can you tell me a story with the word {listed}?",
                         f"Tell me a story about {q[0]}."])
         return str(msg), {"kind": "words", "words": words}
-    if r < 0.85:
+    if r < (0.85 if mode == "mixed" else 0.92):
         s = first_sentence(story)
         if s is None:
             return None
@@ -120,7 +132,8 @@ def story_request(story: str, rng: np.random.Generator) -> tuple[str, dict] | No
     return str(msg), {"kind": "free"}
 
 
-def make_conversation(stories: list[str], rng: np.random.Generator) -> tuple[list[dict], list[dict]]:
+def make_conversation(stories: list[str], rng: np.random.Generator,
+                      mode: str = "mixed") -> tuple[list[dict], list[dict]]:
     """A 1-3 turn conversation from up to 3 stories (consumed from the front). Returns (messages, specs)."""
     msgs: list[dict] = []
     specs: list[dict] = []
@@ -131,7 +144,7 @@ def make_conversation(stories: list[str], rng: np.random.Generator) -> tuple[lis
         specs.append({"kind": "smalltalk"})
     while stories and len(specs) < n_turns + (1 if specs and specs[0]["kind"] == "smalltalk" else 0):
         story = stories.pop(0)
-        req = story_request(story, rng)
+        req = story_request(story, rng, mode)
         if req is None:
             continue
         msgs += [{"role": "user", "content": req[0]}, {"role": "assistant", "content": story}]
@@ -158,13 +171,13 @@ def fit_row(tok, messages: list[dict], block_size: int) -> tuple[list[int], list
     return None
 
 
-def build_chat_rows(tok, stories: list[str], block_size: int, seed: int = 0):
+def build_chat_rows(tok, stories: list[str], block_size: int, seed: int = 0, mode: str = "mixed"):
     """Stories -> (x, y, convs). convs = list of (messages kept, specs kept) for each row."""
     rng = np.random.default_rng(seed)
     pool = list(stories)
     xs, ys, convs = [], [], []
     while pool:
-        msgs, specs = make_conversation(pool, rng)
+        msgs, specs = make_conversation(pool, rng, mode)
         if not specs:
             continue
         r = fit_row(tok, msgs, block_size)

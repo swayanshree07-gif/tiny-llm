@@ -203,3 +203,15 @@ def test_instruct_finetune_with_mask_weights(data_dir, tmp_path):
     out = train(MCFG, cfg, verbose=False)
     vals = [h["loss"] for h in out["history"] if h["type"] == "val"]
     assert out["step"] == 30 and vals[-1] < vals[0]
+
+
+def test_weights_only_checkpoint(data_dir, tmp_path):
+    from tinyllm.checkpoint import latest_checkpoint, load_checkpoint
+    out = tmp_path / "w"
+    train(MCFG, tcfg(data_dir, out, max_steps=10, save_optimizer=False), verbose=False)
+    st = load_checkpoint(latest_checkpoint(out))
+    assert st["optimizer"] is None and st["step"] == 10 and "model" in st
+    m = GPT(MCFG)
+    m.load_state_dict(st["model"])  # usable for inference
+    with pytest.raises(ValueError, match="optimizer"):
+        train(MCFG, tcfg(data_dir, out, max_steps=20, save_optimizer=False), verbose=False)

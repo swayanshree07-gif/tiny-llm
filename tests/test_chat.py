@@ -83,3 +83,21 @@ def test_build_chat_rows(tok):
         for m, s in zip(msgs[1::2], specs):
             if s["kind"] == "words":
                 assert all(w in m["content"].lower() for w in s["words"])
+
+
+def test_three_mode_always_three_words():
+    rng = np.random.default_rng(0)
+    story = ("Tom had a red ball. Tom liked the ball and the park. In the park, the ball went up a tree. "
+             "Tom asked his mom for help and the tree let the ball fall down.")
+    kinds = []
+    for _ in range(300):
+        r = C.story_request(story, rng, mode="three")
+        if r is None:
+            continue
+        kinds.append(r[1]["kind"])
+        if r[1]["kind"] == "words":
+            assert len(r[1]["words"]) == 3
+            assert all(w in story for w in r[1]["words"])
+    assert 0.6 < kinds.count("words") / len(kinds) < 0.8
+    with pytest.raises(ValueError):
+        C.story_request(story, rng, mode="nope")

@@ -49,6 +49,8 @@ class TrainConfig:
     log_interval: int = 10
     ckpt_interval: int = 500
     keep_ckpts: int = 2
+    # False: checkpoints hold weights only (~4x smaller, can't resume); for fine-tunes on a tight disk
+    save_optimizer: bool = True
     seed: int = 1337
     device: str = "cuda"
     dtype: str = "auto"           # "auto" (bf16 on GPU), "bf16", "fp32"
@@ -201,6 +203,8 @@ def train(mcfg: GPTConfig, tcfg: TrainConfig, verbose: bool = True) -> dict:
         if st["model_config"] != mcfg.to_dict():
             raise ValueError(f"checkpoint {ck} model config differs from requested config")
         model.load_state_dict(st["model"])
+        if st.get("optimizer") is None:
+            raise ValueError(f"{ck} has no optimizer state (save_optimizer=false); cannot resume")
         opt.load_state_dict(st["optimizer"])
         train_ds.load_state_dict(st["train_data"])
         torch.set_rng_state(st["rng_cpu"])
@@ -247,7 +251,7 @@ def train(mcfg: GPTConfig, tcfg: TrainConfig, verbose: bool = True) -> dict:
         state = {
             "step": step,
             "model": model.state_dict(),
-            "optimizer": opt.state_dict(),
+            "optimizer": opt.state_dict() if tcfg.save_optimizer else None,
             "model_config": mcfg.to_dict(),
             "train_config": asdict(tcfg),
             "train_data": train_ds.state_dict(),

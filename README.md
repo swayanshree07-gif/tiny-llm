@@ -112,6 +112,16 @@ how often the generated story actually contains the requested words or starts wi
 timeout 40m .venv/bin/python scripts/train.py --config configs/chat_large_v2.json > .logs/chat_large_v2.log 2>&1
 .venv/bin/python scripts/eval_instruct.py --ckpt ckpt/chat_large_v2 --chat --prompts data/instruct_anyfix/valid_prompts.jsonl
 ```
+Best so far (v3, 20.5% follow rate): `build_chat.py --mode three --out data/chat_v3`, then
+`configs/chat_large_v3.json` (weights-only checkpoint, `"save_optimizer": false`).
+
+Interactive chat (KV cache, history truncated to the 256-token context, `/reset`, `/quit`):
+```bash
+.venv/bin/python scripts/chat.py --ckpt ckpt/chat_large_v3 --temperature 0.8 --top-p 0.95
+printf 'Hello!\nTell me a story.\n' | .venv/bin/python scripts/chat.py --ckpt ckpt/chat_large_v3 --max-turns 2
+```
+Example session: `samples/chat_session.md`.
+
 Template: `User: <msg>\nAssistant: <reply><|endoftext|>` per turn (`tinyllm/chat.py`), loss on replies only.
 Results in `docs/chat_finetune.md`.
 
@@ -189,4 +199,6 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
   `scripts/build_chat.py`, 34k rows). Two chat fine-tunes of the large model: val 1.274 → 1.065, follow rate 14–15.5%
   (below v4's 25%, so Day 22's check is not met yet), see `docs/chat_finetune.md`. Only `ckpt/large/ckpt_0018000.pt`
   is kept now (the run is finished).
-- Not yet: better chat fine-tune, `chat.py`, inference benchmark, int8, eval report, demo script.
+- Chat v3 (always-3-word requests): follow rate 20.5% (best, still < 25%, accepted). `scripts/chat.py` works
+  (Day 23 done, `tests/test_chat_cli.py`).
+- Not yet: inference benchmark, int8, eval report, demo script.

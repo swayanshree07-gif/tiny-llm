@@ -31,6 +31,8 @@ def main() -> int:
     ap.add_argument("--train", type=int, default=60000, help="number of source stories")
     ap.add_argument("--valid", type=int, default=1000)
     ap.add_argument("--block", type=int, default=256)
+    ap.add_argument("--mode", choices=["mixed", "three"], default="mixed",
+                    help="'three': always-3-word requests, mostly salient words (chat v3)")
     args = ap.parse_args()
 
     tok = Tokenizer.load(args.tok_dir / "tokenizer.json")
@@ -41,7 +43,7 @@ def main() -> int:
         t0 = time.perf_counter()
         ids = np.memmap(args.tok_dir / f"{split}.bin", dtype=np.uint16, mode="r")
         stories = stories_from_tokens(tok, ids, n, seed=seed)
-        x, y, convs = build_chat_rows(tok, stories, args.block, seed=seed)
+        x, y, convs = build_chat_rows(tok, stories, args.block, seed=seed, mode=args.mode)
         np.savez(args.out / f"{split}.npz", x=x.astype(np.uint16), y=y.astype(np.int16))
         # tokens of requested words (all "words" turns in the row), up-weighted by train.mask_loss_weight
         m = np.stack([word_target_mask(tok.vocab, row, [w for sp in specs if sp["kind"] == "words"
