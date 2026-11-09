@@ -28,7 +28,7 @@ class Int8Linear(nn.Module):
         self.register_buffer("scale", s)
         self.bias = None if lin.bias is None else nn.Parameter(lin.bias.detach().clone(), requires_grad=False)
 
-    def dequant(self, dtype=torch.float32) -> torch.Tensor:
+    def dequant(self, dtype: torch.dtype = torch.float32) -> torch.Tensor:
         return self.qweight.to(dtype) * self.scale.to(dtype)[:, None]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -24,12 +24,10 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import math
 import sys
 from dataclasses import replace
 from pathlib import Path
 
-import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]

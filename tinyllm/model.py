@@ -39,7 +39,8 @@ class GPTConfig:
         return asdict(self)
 
 
-def rope_cache(T: int, head_dim: int, base: float = 10000.0, device=None):
+def rope_cache(T: int, head_dim: int, base: float = 10000.0,
+               device: torch.device | str | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """cos/sin tables of shape (T, head_dim/2) for rotary embeddings."""
     assert head_dim % 2 == 0
     inv = 1.0 / base ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim)
@@ -60,7 +61,8 @@ class KVCache:
     The cache stores keys after RoPE has been applied, so cached keys never need re-rotating.
     """
 
-    def __init__(self, B: int, H: int, max_len: int, D: int, device=None, dtype=torch.float32) -> None:
+    def __init__(self, B: int, H: int, max_len: int, D: int, device: torch.device | str | None = None,
+                 dtype: torch.dtype = torch.float32) -> None:
         self.k = torch.zeros(B, H, max_len, D, device=device, dtype=dtype)
         self.v = torch.zeros_like(self.k)
         self.pos = 0
@@ -180,14 +182,15 @@ class GPT(nn.Module):
             n -= self.pos_emb.weight.numel()
         return n
 
-    def new_kv_cache(self, batch_size: int, device=None, dtype=torch.float32) -> list[KVCache]:
+    def new_kv_cache(self, batch_size: int, device: torch.device | str | None = None,
+                     dtype: torch.dtype = torch.float32) -> list[KVCache]:
         c = self.cfg
         device = device if device is not None else self.tok_emb.weight.device
         return [KVCache(batch_size, c.n_heads, c.block_size, c.d_model // c.n_heads, device, dtype)
                 for _ in range(c.n_layers)]
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None,
-                kv_cache: list[KVCache] | None = None):
+                kv_cache: list[KVCache] | None = None) -> tuple[torch.Tensor, torch.Tensor | None]:
         """idx (B, T). With kv_cache, idx holds the *new* tokens at positions cache.pos.. ."""
         B, T = idx.shape
         start = kv_cache[0].pos if kv_cache is not None else 0

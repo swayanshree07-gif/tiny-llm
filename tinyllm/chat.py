@@ -22,6 +22,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tinyllm.tokenizer import Tokenizer
+
 from tinyllm.instruct import IGNORE, first_sentence, candidate_words, salient_words
 
 USER = "User: "
@@ -36,7 +41,7 @@ SMALL_TALK = [
 ]
 
 
-def encode_chat(tok, messages: list[dict], add_generation_prompt: bool = False) -> tuple[list[int], list[bool]]:
+def encode_chat(tok: Tokenizer, messages: list[dict], add_generation_prompt: bool = False) -> tuple[list[int], list[bool]]:
     """Encode [{"role": "user"|"assistant", "content": str}, ...] -> (ids, train_mask).
 
     train_mask[i] is True when ids[i] is an assistant reply token or the EOT closing a reply.
@@ -63,7 +68,7 @@ def encode_chat(tok, messages: list[dict], add_generation_prompt: bool = False) 
     return ids, mask
 
 
-def decode_chat(tok, ids: list[int]) -> list[dict]:
+def decode_chat(tok: Tokenizer, ids: list[int]) -> list[dict]:
     """Inverse of encode_chat (for complete conversations): text -> list of messages."""
     eot = tok.vocab_size - 1
     out: list[dict] = []
@@ -155,7 +160,7 @@ def make_conversation(stories: list[str], rng: np.random.Generator,
     return msgs, specs
 
 
-def fit_row(tok, messages: list[dict], block_size: int) -> tuple[list[int], list[int], int] | None:
+def fit_row(tok: Tokenizer, messages: list[dict], block_size: int) -> tuple[list[int], list[int], int] | None:
     """Encode, dropping whole (user, assistant) turns from the end until it fits in block_size + 1.
 
     Returns (x, y, n_turns_kept) with y = -100 except assistant tokens, or None if one turn doesn't fit.
@@ -171,7 +176,8 @@ def fit_row(tok, messages: list[dict], block_size: int) -> tuple[list[int], list
     return None
 
 
-def build_chat_rows(tok, stories: list[str], block_size: int, seed: int = 0, mode: str = "mixed"):
+def build_chat_rows(tok: Tokenizer, stories: list[str], block_size: int, seed: int = 0,
+                    mode: str = "mixed") -> tuple[np.ndarray, np.ndarray, list[tuple]]:
     """Stories -> (x, y, convs). convs = list of (messages kept, specs kept) for each row."""
     rng = np.random.default_rng(seed)
     pool = list(stories)

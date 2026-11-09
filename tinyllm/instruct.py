@@ -22,6 +22,10 @@ import re
 
 import numpy as np
 import torch
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tinyllm.tokenizer import Tokenizer
 
 PROMPT_PREFIX = "Prompt: "
 STORY_PREFIX = "\nStory:"  # the story is encoded with a leading space (" Once")
@@ -120,7 +124,8 @@ def words_found(spec: dict, story: str) -> float:
     return sum(w in found for w in spec["words"]) / len(spec["words"])
 
 
-def build_rows(tok, stories: list[str], block_size: int, seed: int = 0, word_mode: str = "any"):
+def build_rows(tok: Tokenizer, stories: list[str], block_size: int, seed: int = 0,
+               word_mode: str = "any") -> tuple[np.ndarray, np.ndarray, list[tuple]]:
     """Encode examples into (x, y) int arrays of shape (N, block_size); y = -100 outside the story.
 
     Returns x, y (np.int64) and the list of (prompt, spec) actually used.
@@ -147,7 +152,7 @@ def build_rows(tok, stories: list[str], block_size: int, seed: int = 0, word_mod
     return x, y, used
 
 
-def stories_from_tokens(tok, ids: np.ndarray, n: int, seed: int = 0, max_tokens: int = 400) -> list[str]:
+def stories_from_tokens(tok: Tokenizer, ids: np.ndarray, n: int, seed: int = 0, max_tokens: int = 400) -> list[str]:
     """Decode n random whole stories (between two EOTs) from a token memmap."""
     eot = tok.vocab_size - 1
     rng = np.random.default_rng(seed)
@@ -204,7 +209,7 @@ class InstructDataset:
     def __len__(self) -> int:
         return len(self.x)
 
-    def get_batch(self, batch_size: int, device: torch.device | str = "cpu"):
+    def get_batch(self, batch_size: int, device: torch.device | str = "cpu") -> tuple[torch.Tensor, ...]:
         idx = torch.from_numpy(self.rng.integers(0, len(self.x), size=batch_size))
         out = [self.x[idx], self.y[idx]] + ([self.w[idx]] if self.w is not None else [])
         device = torch.device(device)

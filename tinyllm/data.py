@@ -28,7 +28,7 @@ class TokenDataset:
         """
         return len(self.data) - self.block_size - 2
 
-    def get_batch(self, batch_size: int, device: torch.device | str = "cpu"):
+    def get_batch(self, batch_size: int, device: torch.device | str = "cpu") -> tuple[torch.Tensor, torch.Tensor]:
         """x, y of shape (B, T) int64; y is x shifted left by one token."""
         T = self.block_size
         starts = self.rng.integers(0, self.max_start + 1, size=batch_size)

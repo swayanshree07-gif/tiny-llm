@@ -37,6 +37,6 @@ def save_checkpoint(state: dict, ckpt_dir: str | Path, step: int, keep: int = 2)
     return path
 
 
-def load_checkpoint(path: str | Path, map_location="cpu") -> dict:
+def load_checkpoint(path: str | Path, map_location: str | torch.device = "cpu") -> dict:
     # weights_only=False: the state includes RNG states and plain-python config dicts we wrote ourselves.
     return torch.load(path, map_location=map_location, weights_only=False)

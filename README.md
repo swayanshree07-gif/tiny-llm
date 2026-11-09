@@ -16,6 +16,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python scripts/check_env.py      # GPU / bf16 / SDPA sanity check
 .venv/bin/python -m pytest -q              # tests
+.venv/bin/python scripts/check_lint.py     # stdlib lint (unused imports, docstrings, type hints)
 ```
 
 ## Data
@@ -153,7 +154,7 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–27 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
+Days 1–28 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params. `scripts/check_model.py`
@@ -195,7 +196,7 @@ Days 1–27 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
   Large vs base (`docs/large_vs_base.md`, `docs/figures/large_vs_base.png`): on the same 1.6M held-out tokens
   (`scripts/eval_ppl.py`) large 1.219 vs base 1.241 despite 2.2× fewer training tokens; samples in `samples/large.md`.
   The fine-tune v3 checkpoint and v2 data were deleted to free disk.
-- Chat (Days 21–22, in progress): chat template + dataset builder done and tested (`tinyllm/chat.py`,
+- Chat (Days 21–22): chat template + dataset builder done and tested (`tinyllm/chat.py`,
   `scripts/build_chat.py`, 34k rows). Two chat fine-tunes of the large model: val 1.274 → 1.065, follow rate 14–15.5%
   (below v4's 25%, so Day 22's check is not met yet), see `docs/chat_finetune.md`. Only `ckpt/large/ckpt_0018000.pt`
   is kept now (the run is finished).
@@ -211,4 +212,8 @@ Days 1–27 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
   what helped; checks every linked file exists, `--check` for links only).
 - Day 27 fix: weighted-loss gradient accumulation now divides by the global weight sum over all micro-batches, so
   k micro-batches == one batch even with uneven weights / ignored targets (`tests/test_train.py`).
-- Not yet: Days 28–30 (polish, final `docs/REPORT.md`, `scripts/demo.sh`).
+- Day 28 polish: `scripts/check_lint.py` (stdlib-only: unused imports, module docstrings, type hints on public
+  `tinyllm` functions; `tests/test_lint.py` keeps it clean). Disk audit 2026-11-09: superseded
+  `ckpt/chat_large_v2` checkpoint deleted, folder 11.94 → 10.84 GB (`.venv` 6.8 GB, data 1.4 GB, checkpoints
+  2.5 GB: base, large, instruct-v4, chat-v3, one file each).
+- Not yet: Days 29–30 (final `docs/REPORT.md`, `scripts/demo.sh`).

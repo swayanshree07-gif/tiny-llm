@@ -12,7 +12,8 @@ import json
 import math
 import signal
 import time
-from dataclasses import asdict, dataclass, field, fields
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import numpy as np
@@ -76,7 +77,7 @@ def config_from_dict(d: dict) -> tuple[GPTConfig, TrainConfig]:
     return build(GPTConfig, d.get("model", {})), build(TrainConfig, d.get("train", {}))
 
 
-def autocast_ctx(device: torch.device, dtype_name: str):
+def autocast_ctx(device: torch.device, dtype_name: str) -> contextlib.AbstractContextManager:
     if dtype_name == "fp32":
         return contextlib.nullcontext()
     dt = torch.bfloat16 if dtype_name == "bf16" else best_autocast_dtype(device)
@@ -85,7 +86,8 @@ def autocast_ctx(device: torch.device, dtype_name: str):
     return torch.autocast(device_type="cuda", dtype=dt)
 
 
-def accumulate_grads(model: torch.nn.Module, batches, ctx_factory) -> float:
+def accumulate_grads(model: torch.nn.Module, batches: Iterable[tuple[torch.Tensor, ...]],
+                     ctx_factory: Callable[[], contextlib.AbstractContextManager]) -> float:
     """Forward/backward over micro-batches so the grads equal one big batch.
 
     Plain batches (x, y) with no ignored targets: each mean loss is scaled by 1/k (equal sizes assumed).
@@ -126,7 +128,8 @@ def accumulate_grads(model: torch.nn.Module, batches, ctx_factory) -> float:
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, ds: TokenDataset, iters: int, batch_size: int,
-             device: torch.device, ctx_factory, seed: int) -> float:
+             device: torch.device,
+             ctx_factory: Callable[[], contextlib.AbstractContextManager], seed: int) -> float:
     """Mean loss over `iters` fixed (seeded) random val windows. Restores ds RNG afterwards."""
     was_training = model.training
     model.eval()
