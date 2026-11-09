@@ -215,3 +215,30 @@ def test_weights_only_checkpoint(data_dir, tmp_path):
     m.load_state_dict(st["model"])  # usable for inference
     with pytest.raises(ValueError, match="optimizer"):
         train(MCFG, tcfg(data_dir, out, max_steps=20, save_optimizer=False), verbose=False)
+
+
+def test_weighted_accum_matches_one_batch_with_skewed_weights():
+    """Day 27 fix: k micro-batches with very different weight sums == one big batch."""
+    from contextlib import nullcontext
+    torch.manual_seed(0)
+    m = GPT(MCFG)
+    x = torch.randint(0, V, (4, 16))
+    y = torch.randint(0, V, (4, 16))
+    y[:2, :12] = -100  # first half has few targets
+    w = torch.ones(4, 16)
+    w[2:, 3] = 5.0
+    l_one = accumulate_grads(m, [(x, y, w)], nullcontext)
+    g_one = [p.grad.clone() for p in m.parameters()]
+    m.zero_grad(set_to_none=True)
+    l_acc = accumulate_grads(m, [(x[:2], y[:2], w[:2]), (x[2:], y[2:], w[2:])], nullcontext)
+    assert abs(l_one - l_acc) < 1e-5
+    for g, p in zip(g_one, m.parameters()):
+        torch.testing.assert_close(p.grad, g, rtol=1e-4, atol=1e-6)
+    # unweighted rows with -100 targets also accumulate exactly
+    m.zero_grad(set_to_none=True)
+    accumulate_grads(m, [(x, y)], nullcontext)
+    g_one = [p.grad.clone() for p in m.parameters()]
+    m.zero_grad(set_to_none=True)
+    accumulate_grads(m, [(x[:2], y[:2]), (x[2:], y[2:])], nullcontext)
+    for g, p in zip(g_one, m.parameters()):
+        torch.testing.assert_close(p.grad, g, rtol=1e-4, atol=1e-6)

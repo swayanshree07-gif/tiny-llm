@@ -12,8 +12,8 @@ Uses the real `tinyllm.train.accumulate_grads`, `tinyllm.optim.make_optimizer` a
   5. decay groups on the full model: every dim>=2 tensor decayed, every bias/LayerNorm not, the tied
      embedding/head weight counted once, totals == num_params; with zero grads one AdamW step shrinks
      decayed params by exactly (1 - lr*wd) and leaves undecayed ones unchanged
-  6. info: weighted-loss path (fine-tune) — per-micro-batch normalisation means accumulation is only exact
-     when the weight sums per micro-batch match; the size of the difference is printed (not a failure)
+  6. info: weighted-loss path (fine-tune) — normalised by the global weight sum over all micro-batches
+     (fixed 2026-11-09), so uneven weight sums also accumulate exactly; the difference is printed
 
 Run: .venv/bin/python scripts/check_accum.py [--config configs/base.json] [--tok-dir data/tok]
      [--batch-size 16] [--random] [--cpu]
@@ -195,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     _, gw2 = grads_of(model, [(a, b, c_) for a, b, c_ in zip(x.chunk(2), y.chunk(2), w.chunk(2))], fp32)
     rel = max(float((a - b).norm() / b.norm().clamp_min(1e-12)) for a, b in zip(gw2, gw1))
     print(f"[INFO] weighted loss, uneven weight sums: 2x(B/2) vs 1xB max rel grad diff {rel:.2e} "
-          "(per-micro-batch normalisation; expected, not a bug for training)")
+          "(global weight-sum normalisation; expected ~1e-6)")
 
     if device.type == "cuda":
         peak = torch.cuda.max_memory_allocated() / 2**30

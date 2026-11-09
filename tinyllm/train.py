@@ -86,25 +86,42 @@ def autocast_ctx(device: torch.device, dtype_name: str):
 
 
 def accumulate_grads(model: torch.nn.Module, batches, ctx_factory) -> float:
-    """Forward/backward over micro-batches, each loss scaled by 1/k so grads equal one big batch.
+    """Forward/backward over micro-batches so the grads equal one big batch.
 
-    Returns the mean micro-batch loss (python float). Equal-size micro-batches assumed.
+    Plain batches (x, y) with no ignored targets: each mean loss is scaled by 1/k (equal sizes assumed).
+    Weighted batches (x, y, w), or targets containing -100: the loss is the weighted mean over all
+    non-ignored targets of *all* micro-batches, i.e. every micro-batch sum is divided by the global
+    weight sum (fixed Day 22 session; before, each micro-batch was normalised by its own weight sum).
+    Returns the loss of the whole step (python float).
     """
     k = len(batches)
-    total = 0.0
-    for batch in batches:
-        x, y = batch[0], batch[1]
-        with ctx_factory():
-            if len(batch) == 3:  # per-position weights: weighted mean over non-ignored targets
-                logits, _ = model(x)
-                ce = F.cross_entropy(logits.float().flatten(0, 1), y.flatten(), reduction="none")
-                w = batch[2].flatten() * (y.flatten() != -100)
-                loss = (ce * w).sum() / w.sum().clamp_min(1e-8)
-            else:
+    weighted = any(len(b) == 3 or bool((b[1] == -100).any()) for b in batches)
+    if not weighted:
+        total = 0.0
+        for x, y in batches:
+            with ctx_factory():
                 _, loss = model(x, y)
-        (loss / k).backward()
-        total += loss.detach().float()
-    return float(total / k)
+            (loss / k).backward()
+            total += loss.detach().float()
+        return float(total / k)
+
+    def wts(b):
+        y = b[1].flatten()
+        w = b[2].flatten().float() if len(b) == 3 else torch.ones_like(y, dtype=torch.float32)
+        return w * (y != -100)
+
+    W = sum(float(wts(b).sum()) for b in batches)
+    W = max(W, 1e-8)
+    total = 0.0
+    for b in batches:
+        x, y = b[0], b[1]
+        with ctx_factory():
+            logits, _ = model(x)
+            ce = F.cross_entropy(logits.float().flatten(0, 1), y.flatten(), reduction="none", ignore_index=-100)
+            part = (ce * wts(b)).sum() / W
+        part.backward()
+        total += float(part.detach())
+    return total
 
 
 @torch.no_grad()
