@@ -106,6 +106,15 @@ The loss is computed on the story only (prompt and padding targets are -100). `e
 how often the generated story actually contains the requested words or starts with the requested sentence.
 `train.init_from` loads the weights only (with a fresh optimizer), and `train.data_kind=instruct` reads `.npz` rows.
 
+### Chat fine-tune (PLAN Days 21–22)
+```bash
+.venv/bin/python scripts/build_chat.py           # -> data/chat/{train,valid}.npz, *_wordmask.npz, *_convs.jsonl (~15 s)
+timeout 40m .venv/bin/python scripts/train.py --config configs/chat_large_v2.json > .logs/chat_large_v2.log 2>&1
+.venv/bin/python scripts/eval_instruct.py --ckpt ckpt/chat_large_v2 --chat --prompts data/instruct_anyfix/valid_prompts.jsonl
+```
+Template: `User: <msg>\nAssistant: <reply><|endoftext|>` per turn (`tinyllm/chat.py`), loss on replies only.
+Results in `docs/chat_finetune.md`.
+
 Generation uses a KV cache by default (`--no-cache` turns it off); greedy output is identical
 either way while the text fits in the 256-token context.
 
@@ -176,4 +185,8 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
   Large vs base (`docs/large_vs_base.md`, `docs/figures/large_vs_base.png`): on the same 1.6M held-out tokens
   (`scripts/eval_ppl.py`) large 1.219 vs base 1.241 despite 2.2× fewer training tokens; samples in `samples/large.md`.
   The fine-tune v3 checkpoint and v2 data were deleted to free disk.
-- Not yet: chat fine-tune and `chat.py`, int8, eval report, demo script.
+- Chat (Days 21–22, in progress): chat template + dataset builder done and tested (`tinyllm/chat.py`,
+  `scripts/build_chat.py`, 34k rows). Two chat fine-tunes of the large model: val 1.274 → 1.065, follow rate 14–15.5%
+  (below v4's 25%, so Day 22's check is not met yet), see `docs/chat_finetune.md`. Only `ckpt/large/ckpt_0018000.pt`
+  is kept now (the run is finished).
+- Not yet: better chat fine-tune, `chat.py`, inference benchmark, int8, eval report, demo script.

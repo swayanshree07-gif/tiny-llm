@@ -21,11 +21,17 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tinyllm.chat import encode_chat  # noqa: E402
 from tinyllm.device import get_device  # noqa: E402
 from tinyllm.generate import generate, load_model  # noqa: E402
-from tinyllm.instruct import follows, words_found  # noqa: E402
+from tinyllm.instruct import PROMPT_PREFIX, STORY_PREFIX, follows, words_found  # noqa: E402
 from tinyllm.quality import repeated_ngram_frac  # noqa: E402
 from tinyllm.tokenizer import Tokenizer  # noqa: E402
+
+
+def chat_message(prompt: str) -> str:
+    """'Prompt: <request>\\nStory:' (instruct format) -> '<request>' (chat user message)."""
+    return prompt.removeprefix(PROMPT_PREFIX).removesuffix(STORY_PREFIX)
 
 
 def main(argv=None) -> int:
@@ -40,6 +46,8 @@ def main(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--chat", action="store_true",
+                    help="wrap each request in the chat template (User:/Assistant:) for chat fine-tunes")
     args = ap.parse_args(argv)
 
     device = get_device()
@@ -50,7 +58,11 @@ def main(argv=None) -> int:
 
     # batch prompts of equal token length together (no padding needed)
     groups: dict[int, list[int]] = defaultdict(list)
-    enc = [tok.encode_ordinary(s["prompt"]) for s in specs]
+    if args.chat:
+        enc = [encode_chat(tok, [{"role": "user", "content": chat_message(s["prompt"])}],
+                           add_generation_prompt=True)[0] for s in specs]
+    else:
+        enc = [tok.encode_ordinary(s["prompt"]) for s in specs]
     for i, e in enumerate(enc):
         groups[len(e)].append(i)
     outs: list[str] = [""] * len(specs)
@@ -79,7 +91,7 @@ def main(argv=None) -> int:
         rep4.append(repeated_ngram_frac(text, 4))
     allf = [v for vs in by_kind.values() for v in vs]
     lines = [f"# Prompt-following eval — `{args.ckpt}` (step {st.get('step')})", "",
-             f"{len(specs)} held-out prompts, T={args.temperature} top-p={args.top_p}, seed {args.seed}.", "",
+             f"{len(specs)} held-out prompts{" (chat template)" if args.chat else ""}, T={args.temperature} top-p={args.top_p}, seed {args.seed}.", "",
              "| prompt kind | n | follows |", "|---|---|---|"]
     for k, vs in sorted(by_kind.items()):
         lines.append(f"| {k} | {len(vs)} | {sum(vs) / len(vs):.1%} |")
