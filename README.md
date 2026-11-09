@@ -201,4 +201,9 @@ Days 1–26 of `PLAN.md` are done (the Day 8 attention, Day 9 model and Day 10 R
   is kept now (the run is finished).
 - Chat v3 (always-3-word requests): follow rate 20.5% (best, still < 25%, accepted). `scripts/chat.py` works
   (Day 23 done, `tests/test_chat_cli.py`).
-- Not yet: inference benchmark, int8, eval report, demo script.
+- Inference speed (Day 24, `scripts/infer_bench.py` → `docs/infer_bench.md`): base / large / chat-v3, fp32 and bf16,
+  batch 1/8/32, cache vs no cache. fp32 cached greedy == uncached greedy everywhere; cache speedup 1.6–3x at batch 1,
+  up to 25x at batch 32 (base bf16 B=32 ≈ 13k tok/s, large ≈ 6.9k tok/s).
+- Int8 weight-only quantization (Day 25, `tinyllm/quant.py`, `scripts/eval_int8.py` → `docs/infer_bench_int8.md`):
+  val loss +0.0001 (base) / +0.0002 (large), weights 2.5–3.1x smaller, ~25% slower (dequantize on the fly).
+- Not yet: evaluation report `docs/EVAL.md` (Day 26), demo script.
