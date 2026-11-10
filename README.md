@@ -5,7 +5,16 @@ own byte-level BPE tokenizer, decoder-only transformer, training loop with
 mixed precision / gradient accumulation / cosine LR / checkpoint-resume,
 validation perplexity, and sampling with temperature / top-k / top-p.
 It's trained on a subset of [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories)
-(CDLA-Sharing-1.0) and should end up writing short coherent stories.
+(CDLA-Sharing-1.0) and writes short coherent stories; fine-tunes add instruction following and a chat mode.
+
+## Quick demo
+```bash
+bash scripts/demo.sh            # base + large stories, instruct story, scripted chat (~12 s on GPU)
+bash scripts/demo.sh --quick    # base stories + chat only, 60 new tokens
+bash scripts/demo.sh --device cpu
+.venv/bin/python scripts/chat.py --ckpt ckpt/chat_large_v3   # interactive chat (/reset, /quit)
+```
+Needs the checkpoints in `ckpt/` (not in git; train them with the commands below).
 
 See `PLAN.md` for the 30-day plan and `PROGRESS.md` for the daily log.
 
@@ -155,7 +164,7 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–29 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. The final report is `docs/REPORT.md` (architecture, loss curves, large vs base, fine-tunes, inference, what changed results).
+All 30 days of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. The final report is `docs/REPORT.md` (architecture, loss curves, large vs base, fine-tunes, inference, what changed results).
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params. `scripts/check_model.py`
@@ -218,4 +227,5 @@ Days 1–29 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
   `ckpt/chat_large_v2` checkpoint deleted, folder 11.94 → 10.84 GB (`.venv` 6.8 GB, data 1.4 GB, checkpoints
   2.5 GB: base, large, instruct-v4, chat-v3, one file each).
 - Day 29: `docs/REPORT.md` finalised; `scripts/check_report.py` (+ `tests/test_check_report.py`) checks it.
-- Not yet: Day 30 (`scripts/demo.sh`, final README).
+- Day 30: `scripts/demo.sh` runs the whole demo under `timeout` (`tests/test_demo.py`).
+- Optional extra not done: a longer context (256 tokens drops chat history after one turn).
