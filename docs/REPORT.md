@@ -212,6 +212,9 @@ The planned check (≥ 25%) was not met; v3 was accepted. The bigger base did no
 here: the data are small and synthetic, val loss flattens after ~100 steps, and the chat set has fewer word rows
 (34k vs 132k). `scripts/chat.py` is an interactive multi-turn CLI (KV cache, T/top-k/top-p flags, history
 truncated to the 256-token context, `--max-turns` for scripted runs; driven by `tests/test_chat_cli.py`).
+`--min-new N` (default 120) keeps old turns while N reply tokens still fit; with ~150-token stories turn 1
+is still dropped at 120, and `--min-new 40` keeps it but shortens replies, so real multi-turn chat needs a
+longer context.
 
 ## 6. Inference speed and int8
 Greedy, 240 new tokens, median of 3 ([infer_bench.md](infer_bench.md), `scripts/infer_bench.py`):
