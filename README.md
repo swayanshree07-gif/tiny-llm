@@ -12,6 +12,7 @@ It's trained on a subset of [TinyStories](https://huggingface.co/datasets/ronene
 bash scripts/demo.sh            # base + large stories, instruct story, scripted chat (~12 s on GPU)
 bash scripts/demo.sh --quick    # base stories + chat only, 60 new tokens
 bash scripts/demo.sh --device cpu
+bash scripts/regress.sh         # one-command regression: pytest, lint, report/EVAL checks, quick demo, disk
 .venv/bin/python scripts/chat.py --ckpt ckpt/chat_large_v3   # interactive chat (/reset, /quit)
 ```
 Needs the checkpoints in `ckpt/` (not in git; train them with the commands below).
@@ -227,5 +228,6 @@ All 30 days of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
   `ckpt/chat_large_v2` checkpoint deleted, folder 11.94 → 10.84 GB (`.venv` 6.8 GB, data 1.4 GB, checkpoints
   2.5 GB: base, large, instruct-v4, chat-v3, one file each).
 - Day 29: `docs/REPORT.md` finalised; `scripts/check_report.py` (+ `tests/test_check_report.py`) checks it.
+- Day 26 session (extra): `scripts/regress.sh` runs every regression check in one command (RESULT OK, ~40 s).
 - Day 30: `scripts/demo.sh` runs the whole demo under `timeout` (`tests/test_demo.py`).
 - Optional extra not done: a longer context (256 tokens drops chat history after one turn).
