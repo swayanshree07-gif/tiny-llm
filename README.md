@@ -167,6 +167,8 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
+**Project finished (Day 30, 2026-11-10):** final regression (`scripts/regress.sh`) and full demo (`scripts/demo.sh`) both pass.
+
 All 30 days of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. The final report is `docs/REPORT.md` (architecture, loss curves, large vs base, fine-tunes, inference, what changed results).
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
