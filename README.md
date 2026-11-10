@@ -17,6 +17,7 @@ python3 -m venv .venv
 .venv/bin/python scripts/check_env.py      # GPU / bf16 / SDPA sanity check
 .venv/bin/python -m pytest -q              # tests
 .venv/bin/python scripts/check_lint.py     # stdlib lint (unused imports, docstrings, type hints)
+.venv/bin/python scripts/check_report.py   # REPORT.md: sections, links/PNGs exist, numbers match EVAL.md
 ```
 
 ## Data
@@ -145,7 +146,7 @@ configs/        base.json (main run), smoke.json (small model, quick checks),
                 sweep_{lr3e-4,lr1.2e-3,bs32k}.json (LR / batch sweep, 49M tokens each),
                 instruct.json / instruct_v2..v4.json (Day 27 fine-tunes from ckpt/base)
 tests/          pytest suite
-docs/           REPORT.md (draft), bench.md, kv_cache.md, instruct_eval_*.md, figures/
+docs/           REPORT.md (final report), EVAL.md, bench.md, kv_cache.md, instruct_eval_*.md, figures/
 samples/        sample-suite outputs (samples/tmp/ is git-ignored)
 ```
 
@@ -154,7 +155,7 @@ VRAM < ~6.5 GB, each training session ≤ 45 min under `timeout`, whole folder �
 data ≤ 1.5 GB, keep only the latest 2 checkpoints.
 
 ## Status
-Days 1–28 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. A draft report is in `docs/REPORT.md`.
+Days 1–29 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat model 20.5%) (the Day 8 attention, Day 9 model and Day 10 RoPE checks re-run as scripts on the trained model on 2026-11-07, the Day 11 overfit, Day 12 grad-accum, Day 13 schedule and Day 14 resume checks on 2026-11-08), and Day 27 (instruction fine-tune) has four passes. The final report is `docs/REPORT.md` (architecture, loss curves, large vs base, fine-tunes, inference, what changed results).
 - Data/tokenizer: TinyStories subset, own 8192-token byte-level BPE, 176.7M train tokens,
   4.14 bytes/token. `scripts/check_tokenizer.py` and `scripts/check_tokens.py` re-verify it.
 - Model: GPT (pre-LN, RoPE or learned positions, tied embeddings), 29.4M params. `scripts/check_model.py`
@@ -181,7 +182,7 @@ Days 1–28 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
   reach 88.6%, but "uses the words" prompts only 1.2% (23.6% of the requested words appear).
 - Fine-tune v2 (`ckpt/instruct_v2`, 132k rows, ~1 epoch): val loss 1.082 (better than v1's 1.103), but follow rate
   is about the same at 15.0%. `scripts/prompt_sensitivity.py` shows the models barely use the word list
-  (wrong words cost +0.01 nats/token, against +0.21 for a wrong first sentence). See `docs/REPORT.md` §5.3.
+  (wrong words cost +0.01 nats/token, against +0.21 for a wrong first sentence). See `docs/REPORT.md` §5.1.
 - Fine-tune v3 (`ckpt/instruct_v3`): fixed a prompt bug (~9% of word prompts asked for fragments like "uddenly") and
   drew the words from the story's repeated (salient) words. Follow rate 16.5% / 20.0% on fixed / salient prompts
   (v2: 15.0% / 18.5%), words partial credit 31–37% (v2 23–27%), word-list sensitivity about doubled. Still only ~3%
@@ -216,4 +217,5 @@ Days 1–28 of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
   `tinyllm` functions; `tests/test_lint.py` keeps it clean). Disk audit 2026-11-09: superseded
   `ckpt/chat_large_v2` checkpoint deleted, folder 11.94 → 10.84 GB (`.venv` 6.8 GB, data 1.4 GB, checkpoints
   2.5 GB: base, large, instruct-v4, chat-v3, one file each).
-- Not yet: Days 29–30 (final `docs/REPORT.md`, `scripts/demo.sh`).
+- Day 29: `docs/REPORT.md` finalised; `scripts/check_report.py` (+ `tests/test_check_report.py`) checks it.
+- Not yet: Day 30 (`scripts/demo.sh`, final README).
