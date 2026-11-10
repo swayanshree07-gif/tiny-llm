@@ -76,3 +76,15 @@ def test_build_prompt_fits_and_ends_with_generation_prompt(tok):
     assert len(long_ids) == 68 and tok.decode(long_ids).endswith("Assistant:")
     with pytest.raises(ValueError):
         chat_cli.build_prompt(tok, [], "x", 64, 60)
+
+
+def test_min_new_keeps_history_and_fits_context(ckpt, tok):
+    from tinyllm.generate import load_model
+    model, _ = load_model(str(ckpt), "cpu")
+    hist = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello there."}]
+    g = torch.Generator().manual_seed(0)
+    # Reserving the full max_new (old behaviour) drops the history ...
+    _, d_old = chat_cli.reply(model, tok, hist, "Tell me more.", 50, 0.8, None, 0.95, g)
+    # ... a small min_new keeps it, and generation stays within block_size (no error).
+    text, d_new = chat_cli.reply(model, tok, hist, "Tell me more.", 50, 0.8, None, 0.95, g, min_new=10)
+    assert d_old == 1 and d_new == 0 and isinstance(text, str)

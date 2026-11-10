@@ -127,7 +127,9 @@ timeout 40m .venv/bin/python scripts/train.py --config configs/chat_large_v2.jso
 Best so far (v3, 20.5% follow rate): `build_chat.py --mode three --out data/chat_v3`, then
 `configs/chat_large_v3.json` (weights-only checkpoint, `"save_optimizer": false`).
 
-Interactive chat (KV cache, history truncated to the 256-token context, `/reset`, `/quit`):
+Interactive chat (KV cache, history truncated to the 256-token context, `/reset`, `/quit`).
+`--min-new N` (default 120) keeps old turns while at least N reply tokens still fit; use a small value
+(e.g. `--min-new 40`) to keep more history at the cost of shorter replies:
 ```bash
 .venv/bin/python scripts/chat.py --ckpt ckpt/chat_large_v3 --temperature 0.8 --top-p 0.95
 printf 'Hello!\nTell me a story.\n' | .venv/bin/python scripts/chat.py --ckpt ckpt/chat_large_v3 --max-turns 2
@@ -230,4 +232,5 @@ All 30 days of `PLAN.md` are done (Day 22's 25% follow target missed: best chat 
 - Day 29: `docs/REPORT.md` finalised; `scripts/check_report.py` (+ `tests/test_check_report.py`) checks it.
 - Day 26 session (extra): `scripts/regress.sh` runs every regression check in one command (RESULT OK, ~40 s).
 - Day 30: `scripts/demo.sh` runs the whole demo under `timeout` (`tests/test_demo.py`).
-- Optional extra not done: a longer context (256 tokens drops chat history after one turn).
+- Optional extra not done: a longer context. With 256 tokens a full story reply (~150 tokens) still pushes
+  history out at the default `--min-new 120`; `--min-new 40` keeps one turn of history but shortens replies.

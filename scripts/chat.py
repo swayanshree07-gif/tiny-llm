@@ -49,11 +49,17 @@ def build_prompt(tok, history: list[dict], user_msg: str, block_size: int,
 
 
 def reply(model, tok, history: list[dict], user_msg: str, max_new: int, temperature: float,
-          top_k: int | None, top_p: float | None, generator: torch.Generator | None) -> tuple[str, int]:
-    """Generate one assistant reply. Returns (text, n_pairs_dropped)."""
+          top_k: int | None, top_p: float | None, generator: torch.Generator | None,
+          min_new: int | None = None) -> tuple[str, int]:
+    """Generate one assistant reply. Returns (text, n_pairs_dropped).
+
+    History is kept while at least `min_new` reply tokens fit; the reply budget is then
+    min(max_new, room left). min_new=None means reserve the full max_new (old behaviour)."""
     T = model.cfg.block_size
     max_new = min(max_new, T - 8)
-    ids, dropped = build_prompt(tok, history, user_msg, T, max_new)
+    reserve = max_new if min_new is None else min(min_new, max_new)
+    ids, dropped = build_prompt(tok, history, user_msg, T, reserve)
+    max_new = min(max_new, T - len(ids))
     dev = next(model.parameters()).device
     x = torch.tensor([ids], dtype=torch.long, device=dev)
     eot = tok.vocab_size - 1
@@ -71,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ckpt", required=True, help="checkpoint file or directory (latest is used)")
     ap.add_argument("--tokenizer", type=Path, default=ROOT / "data/tok/tokenizer.json")
     ap.add_argument("--max-new", type=int, default=200)
+    ap.add_argument("--min-new", type=int, default=120,
+                    help="keep chat history while at least this many reply tokens fit")
     ap.add_argument("--temperature", type=float, default=0.8)
     ap.add_argument("--top-k", type=int, default=None)
     ap.add_argument("--top-p", type=float, default=0.95)
@@ -109,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         if not interactive:
             print(f"User: {msg}")
         text, dropped = reply(model, tok, history, msg, args.max_new, args.temperature,
-                              args.top_k, args.top_p, gen)
+                              args.top_k, args.top_p, gen, args.min_new)
         if dropped:
             history = history[2 * dropped:]
             print(f"[dropped {dropped} old turn(s) to fit the context]", file=sys.stderr)
